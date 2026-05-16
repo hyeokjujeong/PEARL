@@ -20,7 +20,13 @@ def register_env(name):
 
 
 # automatically import any envs in the envs/ directory
+# a module that fails to import (e.g. a MuJoCo env when MuJoCo is unavailable)
+# is skipped with a warning so unrelated envs (e.g. point-robot) still work
 for file in os.listdir(os.path.dirname(__file__)):
     if file.endswith('.py') and not file.startswith('_'):
         module = file[:file.find('.py')]
-        importlib.import_module('rlkit.envs.' + module)
+        try:
+            importlib.import_module('rlkit.envs.' + module)
+        except Exception as e:
+            print('WARNING: could not import rlkit.envs.{} ({}: {})'.format(
+                module, type(e).__name__, e))

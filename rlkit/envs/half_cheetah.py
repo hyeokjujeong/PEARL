@@ -1,7 +1,17 @@
 import numpy as np
-from gym.envs.mujoco import HalfCheetahEnv as HalfCheetahEnv_
 
-class HalfCheetahEnv(HalfCheetahEnv_):
+from .mujoco_env import MujocoEnv
+
+
+class HalfCheetahEnv(MujocoEnv):
+    """Half-cheetah base env, ported to the modern ``mujoco`` bindings.
+
+    The half_cheetah.xml model is loaded from gymnasium's bundled assets.
+    """
+
+    def __init__(self):
+        super().__init__('half_cheetah.xml', frame_skip=5)
+
     def _get_obs(self):
         return np.concatenate([
             self.sim.data.qpos.flat[1:],
@@ -9,22 +19,12 @@ class HalfCheetahEnv(HalfCheetahEnv_):
             self.get_body_com("torso").flat,
         ]).astype(np.float32).flatten()
 
+    def reset_model(self):
+        qpos = self.init_qpos + self.np_random.uniform(
+            low=-.1, high=.1, size=self.model.nq)
+        qvel = self.init_qvel + self.np_random.standard_normal(self.model.nv) * .1
+        self.set_state(qpos, qvel)
+        return self._get_obs()
+
     def viewer_setup(self):
-        camera_id = self.model.camera_name2id('track')
-        self.viewer.cam.type = 2
-        self.viewer.cam.fixedcamid = camera_id
-        self.viewer.cam.distance = self.model.stat.extent * 0.35
-        # Hide the overlay
-        self.viewer._hide_overlay = True
-
-    def render(self, mode='human'):
-        if mode == 'rgb_array':
-            self._get_viewer().render()
-            # window size used for old mujoco-py:
-            width, height = 500, 500
-            data = self._get_viewer().read_pixels(width, height, depth=False)
-            return data
-        elif mode == 'human':
-            self._get_viewer().render()
-
-
+        pass

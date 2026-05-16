@@ -1,6 +1,6 @@
 import numpy as np
-from gym import spaces
-from gym import Env
+from gymnasium import spaces
+from gymnasium import Env
 
 from . import register_env
 

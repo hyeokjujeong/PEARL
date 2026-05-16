@@ -22,6 +22,33 @@ in asymptotic performance on several meta-RL benchmarks.
 This is the reference implementation of the algorithm; however, some scripts for reproducing a few of the experiments from the paper are missing.
 This repository is based on [rlkit](https://github.com/vitchyr/rlkit).
 
+--------------------------------------
+
+#### Modernized setup (2026)
+
+The original environment (`docker/environment.yml`) is pinned to 2019 builds
+(python 3.5, torch 1.0.1, CUDA 10, `mujoco-py` 1.50) and no longer installs on
+current systems or runs on recent GPUs. A modernized dependency set is provided
+in `requirements-modern.txt`. It uses python 3.11, recent PyTorch, **gymnasium**
+instead of `gym`, and the DeepMind **`mujoco`** package instead of `mujoco-py`
+(so no MuJoCo license key is needed).
+
+```
+conda create -n pearl python=3.11 -y
+conda activate pearl
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements-modern.txt
+python launch_experiment.py ./configs/point-robot.json
+```
+
+Verified working on this setup: `point-robot`, `sparse-point-robot`,
+`cheetah-dir`, `cheetah-vel`, `ant-dir`, `ant-goal`, `humanoid-dir` (GPU
+training). The `*_rand_params` (Walker/Hopper) tasks are **not** ported — they
+depend on the `rand_param_envs` submodule and MuJoCo131; see the modernization
+notes for the methodology to port them later.
+
+The instructions below describe the **original** (2019) setup.
+
 We ran our ProMP, MAML-TRPO, and RL2 baselines in the [reference ProMP repo](https://github.com/jonasrothfuss/ProMP) and our MAESN comparison in the [reference MAESN repo](https://github.com/RussellM2020/maesn_suite).
 The results for PEARL as well as all baselines on the six continuous control tasks shown in Figure 3 may be downloaded [here](https://www.dropbox.com/s/3uorwtrqzury6wt/results_cont_control.zip?dl=0).
 

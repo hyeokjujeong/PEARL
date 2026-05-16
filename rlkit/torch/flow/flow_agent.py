@@ -42,9 +42,12 @@ class FlowPEARLAgent(PEARLAgent):
         pass
 
     def log_diagnostics(self, eval_statistics):
+        # Called at eval time with a SINGLE task's c (self.z shape (1, latent)).
+        # Variance across tasks is meaningless here, so only log the norm, and
+        # under an eval-specific key — must NOT clobber 'c_variance', which is
+        # the across-tasks training metric set by FlowPEARLSoftActorCritic.
         z = ptu.get_numpy(self.z)
-        eval_statistics['c_norm'] = float(np.mean(np.linalg.norm(z, axis=-1)))
-        eval_statistics['c_variance'] = float(np.mean(np.var(z, axis=0)))
+        eval_statistics['c_norm eval'] = float(np.mean(np.linalg.norm(z, axis=-1)))
 
     @property
     def networks(self):

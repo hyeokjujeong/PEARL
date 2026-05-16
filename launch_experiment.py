@@ -44,6 +44,7 @@ def experiment(variant):
             context_dim=context_encoder_input_dim,
             latent_dim=latent_dim,
             hidden_dim=variant['flow_params']['encoder_hidden'],
+            n_ode_steps=variant['flow_params']['n_ode_steps'],
         )
     else:
         context_encoder = encoder_model(

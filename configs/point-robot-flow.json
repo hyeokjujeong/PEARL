@@ -17,5 +17,8 @@
         "reward_scale": 100.0,
         "kl_lambda": 0.1,
         "use_information_bottleneck": false
+    },
+    "util_params": {
+        "use_wandb": true
     }
 }

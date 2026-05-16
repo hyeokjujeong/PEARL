@@ -19,3 +19,8 @@ __pycache__
 
 /output
 /output/**
+
+# Claude Code & local scratch
+CLAUDE.md
+TMAZE_guideline_v*.md
+.claude/

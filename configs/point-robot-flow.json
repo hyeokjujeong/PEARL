@@ -16,7 +16,9 @@
         "max_path_length": 20,
         "reward_scale": 100.0,
         "kl_lambda": 0.1,
-        "use_information_bottleneck": false
+        "use_information_bottleneck": false,
+        "embedding_batch_size": 64,
+        "embedding_mini_batch_size": 64
     },
     "util_params": {
         "use_wandb": true

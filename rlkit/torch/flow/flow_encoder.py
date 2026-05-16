@@ -26,6 +26,17 @@ class FlowContextEncoder(nn.Module):
         the context is capped (max_context) and the per-step velocity norm is
         clamped (vel_clip) to avoid NaN. These are MVP guards, not a fix.
 
+    ⚠️ DESIGN LIMITATION (review finding "C2", needs a decision):
+      v_theta is trained ONLY by backprop through the ODE from the decoder
+      reconstruction loss — there is no flow-matching / velocity-regression
+      loss and (by an earlier decision) no KL term. With nothing rewarding
+      stochasticity, training pressures the encoder to ignore the resampled
+      N(0,I) base and collapse to a DETERMINISTIC c(context). The flow/score/
+      ODE machinery then carries no probabilistic meaning — it acts as a
+      fixed permutation-invariant aggregator, not a posterior sampler.
+      Realizing a genuine probabilistic (multimodal) posterior needs either a
+      conditional-flow-matching loss for v_theta or an entropy/IB term.
+
     Interface contract (drop-in for rlkit's MlpEncoder): ``output_size`` and
     ``reset(num_tasks)``.
     """
@@ -53,10 +64,12 @@ class FlowContextEncoder(nn.Module):
         pass
 
     def _tau_embed(self, tau):
-        ''' sinusoidal embedding of the scalar interpolation time tau '''
+        ''' sinusoidal embedding of the scalar interpolation time tau in [0,1].
+        Frequencies are 1..half cycles over the unit interval — bounded so the
+        sin/cos arguments don't alias (a 2**k schedule reached ~400 rad). '''
         half = self.tau_dim // 2
-        freqs = 2.0 ** torch.arange(half, dtype=torch.float32, device=ptu.device)
-        ang = tau * freqs * 3.141592653589793
+        freqs = torch.arange(1, half + 1, dtype=torch.float32, device=ptu.device)
+        ang = 2.0 * 3.141592653589793 * tau * freqs
         return torch.cat([torch.sin(ang), torch.cos(ang)])      # (tau_dim,)
 
     def _fused_velocity(self, c, tau, context):
@@ -73,9 +86,13 @@ class FlowContextEncoder(nn.Module):
         s_fused = s_per.sum(dim=1) - (t - 1) * (-c)                 # s_prior = -c
         v_fused = (c + s_fused * (one_minus ** 2)) / tau_safe
 
-        # MVP numerical guard: clamp the velocity norm to avoid NaN explosion
+        # MVP numerical guard: smoothly squash the velocity norm with tanh.
+        # A hard clamp would zero the gradient for every task above the
+        # threshold (and the (t-1) term makes that frequent) — tanh keeps the
+        # gradient alive everywhere.
         norm = v_fused.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-        return v_fused * (norm.clamp(max=self.vel_clip) / norm)
+        squashed = self.vel_clip * torch.tanh(norm / self.vel_clip)
+        return v_fused * (squashed / norm)
 
     def forward(self, context):
         ''' context: (num_tasks, seq_len, context_dim) -> c: (num_tasks, latent) '''

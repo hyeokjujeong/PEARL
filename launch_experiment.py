@@ -108,8 +108,17 @@ def experiment(variant):
         pickle_dir = experiment_log_dir + '/eval_trajectories'
         pathlib.Path(pickle_dir).mkdir(parents=True, exist_ok=True)
 
+    # optional Weights & Biases logging
+    use_wandb = variant['util_params'].get('use_wandb', False)
+    if use_wandb:
+        _setup_wandb(variant, experiment_log_dir)
+
     # run the algorithm
     algorithm.train()
+
+    if use_wandb:
+        import wandb
+        wandb.finish()
 
 def deep_update_dict(fr, to):
     ''' update dict of dicts with new values '''
@@ -120,6 +129,39 @@ def deep_update_dict(fr, to):
         else:
             to[k] = v
     return to
+
+
+def _to_numeric(d):
+    ''' best-effort convert a dict of stringified values to floats for logging '''
+    out = {}
+    for k, v in d.items():
+        try:
+            out[k] = float(v)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def _setup_wandb(variant, experiment_log_dir):
+    ''' init W&B and forward every dump_tabular() row to it '''
+    import wandb
+    from rlkit.core import logger
+    wandb.init(
+        project=variant['util_params'].get('wandb_project', 'pearl'),
+        name=os.path.basename(experiment_log_dir.rstrip('/')),
+        config=variant,
+        dir=experiment_log_dir,
+    )
+
+    def _log(tabular_dict):
+        metrics = _to_numeric(tabular_dict)
+        epoch = metrics.pop('Epoch', None)
+        if epoch is not None:
+            wandb.log(metrics, step=int(epoch))
+        else:
+            wandb.log(metrics)
+
+    logger.add_tabular_callback(_log)
 
 @click.command()
 @click.argument('config', default=None)

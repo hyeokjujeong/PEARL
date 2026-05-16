@@ -48,6 +48,8 @@ default_config = dict(
         gpu_id=0,
         debug=False, # debugging triggers printing and writes logs to debug directory
         docker=False, # TODO docker is not yet supported
+        use_wandb=False, # log per-iteration metrics to Weights & Biases
+        wandb_project='pearl', # W&B project name (used when use_wandb=True)
     )
 )
 

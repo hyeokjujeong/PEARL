@@ -1,0 +1,12 @@
+{
+    "env_name": "tmaze-active",
+    "n_train_tasks": 2,
+    "n_eval_tasks": 2,
+    "env_params": {
+        "n_tasks": 2,
+        "corridor_length": 10
+    },
+    "algo_params": {
+        "max_path_length": 13
+    }
+}

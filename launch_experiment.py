@@ -102,6 +102,10 @@ def experiment(variant):
         **variant['algo_params']
     )
 
+    if method == 'flow':
+        algorithm.recon_weight = variant['flow_params']['recon_weight']
+        algorithm.collapse_eps = variant['flow_params']['collapse_eps']
+
     # optionally load pre-trained weights
     if variant['path_to_weights'] is not None:
         path = variant['path_to_weights']

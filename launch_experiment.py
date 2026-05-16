@@ -37,11 +37,20 @@ def experiment(variant):
     recurrent = variant['algo_params']['recurrent']
     encoder_model = RecurrentEncoder if recurrent else MlpEncoder
 
-    context_encoder = encoder_model(
-        hidden_sizes=[200, 200, 200],
-        input_size=context_encoder_input_dim,
-        output_size=context_encoder_output_dim,
-    )
+    method = variant.get('method', 'baseline')
+    if method == 'flow':
+        from rlkit.torch.flow.flow_encoder import FlowContextEncoder
+        context_encoder = FlowContextEncoder(
+            context_dim=context_encoder_input_dim,
+            latent_dim=latent_dim,
+            hidden_dim=variant['flow_params']['encoder_hidden'],
+        )
+    else:
+        context_encoder = encoder_model(
+            hidden_sizes=[200, 200, 200],
+            input_size=context_encoder_input_dim,
+            output_size=context_encoder_output_dim,
+        )
     qf1 = FlattenMlp(
         hidden_sizes=[net_size, net_size, net_size],
         input_size=obs_dim + action_dim + latent_dim,
@@ -63,13 +72,28 @@ def experiment(variant):
         latent_dim=latent_dim,
         action_dim=action_dim,
     )
-    agent = PEARLAgent(
-        latent_dim,
-        context_encoder,
-        policy,
-        **variant['algo_params']
-    )
-    algorithm = PEARLSoftActorCritic(
+    if method == 'flow':
+        from rlkit.torch.flow.decoder import TransitionDecoder
+        from rlkit.torch.flow.flow_agent import FlowPEARLAgent
+        from rlkit.torch.flow.flow_sac import FlowPEARLSoftActorCritic
+        decoder = TransitionDecoder(
+            obs_dim, action_dim, latent_dim,
+            hidden_dim=variant['flow_params']['decoder_hidden'],
+        )
+        agent = FlowPEARLAgent(
+            latent_dim, context_encoder, policy, decoder,
+            **variant['algo_params']
+        )
+        algo_class = FlowPEARLSoftActorCritic
+    else:
+        agent = PEARLAgent(
+            latent_dim,
+            context_encoder,
+            policy,
+            **variant['algo_params']
+        )
+        algo_class = PEARLSoftActorCritic
+    algorithm = algo_class(
         env=env,
         train_tasks=list(tasks[:variant['n_train_tasks']]),
         eval_tasks=list(tasks[-variant['n_eval_tasks']:]),

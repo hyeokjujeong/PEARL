@@ -7,6 +7,7 @@ default_config = dict(
     latent_size=5, # dimension of the latent context vector
     net_size=300, # number of units per FC layer in each network
     path_to_weights=None, # path to pre-trained weights to load into networks
+    method='baseline', # 'baseline' = original PEARL; 'flow' = flow-matching context inference
     env_params=dict(
         n_tasks=2, # number of distinct tasks in this domain, shoudl equal sum of train and eval tasks
         randomize_tasks=True, # shuffle the tasks after creating them
@@ -50,7 +51,14 @@ default_config = dict(
         docker=False, # TODO docker is not yet supported
         use_wandb=False, # log per-iteration metrics to Weights & Biases
         wandb_project='pearl', # W&B project name (used when use_wandb=True)
-    )
+    ),
+    flow_params=dict(
+        encoder_hidden=128, # hidden width of the flow context encoder
+        decoder_hidden=128, # hidden width of the transition decoder
+        n_ode_steps=5,      # ODE integration steps for sampling c (Stage 2+)
+        recon_weight=1.0,   # weight of the decoder reconstruction (ELBO) loss
+        collapse_eps=1e-4,  # c_variance below this => latent collapse, abort
+    ),
 )
 
 

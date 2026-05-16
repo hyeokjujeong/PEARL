@@ -1,5 +1,8 @@
 import os
 import importlib
+import warnings
+
+import gym.error
 
 
 ENVS = {}
@@ -19,8 +22,20 @@ def register_env(name):
     return register_env_fn
 
 
-# automatically import any envs in the envs/ directory
+# automatically import any envs in the envs/ directory.
+# Modules that fail to import due to a missing optional dependency (most
+# commonly mujoco_py for the MuJoCo-based envs) are warn-and-skipped so that
+# pure-Python envs in this directory remain usable without the full PEARL
+# install. gym raises gym.error.DependencyNotInstalled (an Exception, not an
+# ImportError) when its MuJoCo backend can't be loaded, so catch both.
 for file in os.listdir(os.path.dirname(__file__)):
     if file.endswith('.py') and not file.startswith('_'):
         module = file[:file.find('.py')]
-        importlib.import_module('rlkit.envs.' + module)
+        try:
+            importlib.import_module('rlkit.envs.' + module)
+        except (ImportError, gym.error.DependencyNotInstalled) as e:
+            warnings.warn(
+                "rlkit.envs: skipped {} due to missing dependency: {}".format(
+                    module, e
+                )
+            )

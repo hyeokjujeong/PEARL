@@ -1,9 +1,11 @@
 import numpy as np
 from gym import Env
 from gym.spaces import Box
-import mujoco_py
 
 from rlkit.core.serializable import Serializable
+
+# mujoco_py is imported lazily inside CameraWrapper.initialize_camera so that
+# NormalizedBoxEnv and ProxyEnv remain usable on installs without mujoco_py.
 
 
 class ProxyEnv(Serializable, Env):
@@ -143,6 +145,7 @@ class CameraWrapper(object):
         )
 
     def initialize_camera(self):
+        import mujoco_py  # lazy: see module docstring at the top of the file
         # set camera parameters for viewing
         sim = self.sim
         viewer = mujoco_py.MjRenderContextOffscreen(sim)

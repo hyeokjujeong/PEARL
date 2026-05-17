@@ -37,11 +37,21 @@ def experiment(variant):
     recurrent = variant['algo_params']['recurrent']
     encoder_model = RecurrentEncoder if recurrent else MlpEncoder
 
-    context_encoder = encoder_model(
-        hidden_sizes=[200, 200, 200],
-        input_size=context_encoder_input_dim,
-        output_size=context_encoder_output_dim,
-    )
+    method = variant.get('method', 'baseline')
+    if method == 'flow':
+        from rlkit.torch.flow.flow_encoder import FlowContextEncoder
+        context_encoder = FlowContextEncoder(
+            context_dim=context_encoder_input_dim,
+            latent_dim=latent_dim,
+            hidden_dim=variant['flow_params']['encoder_hidden'],
+            n_ode_steps=variant['flow_params']['n_ode_steps'],
+        )
+    else:
+        context_encoder = encoder_model(
+            hidden_sizes=[200, 200, 200],
+            input_size=context_encoder_input_dim,
+            output_size=context_encoder_output_dim,
+        )
     qf1 = FlattenMlp(
         hidden_sizes=[net_size, net_size, net_size],
         input_size=obs_dim + action_dim + latent_dim,
@@ -63,13 +73,28 @@ def experiment(variant):
         latent_dim=latent_dim,
         action_dim=action_dim,
     )
-    agent = PEARLAgent(
-        latent_dim,
-        context_encoder,
-        policy,
-        **variant['algo_params']
-    )
-    algorithm = PEARLSoftActorCritic(
+    if method == 'flow':
+        from rlkit.torch.flow.decoder import TransitionDecoder
+        from rlkit.torch.flow.flow_agent import FlowPEARLAgent
+        from rlkit.torch.flow.flow_sac import FlowPEARLSoftActorCritic
+        decoder = TransitionDecoder(
+            obs_dim, action_dim, latent_dim,
+            hidden_dim=variant['flow_params']['decoder_hidden'],
+        )
+        agent = FlowPEARLAgent(
+            latent_dim, context_encoder, policy, decoder,
+            **variant['algo_params']
+        )
+        algo_class = FlowPEARLSoftActorCritic
+    else:
+        agent = PEARLAgent(
+            latent_dim,
+            context_encoder,
+            policy,
+            **variant['algo_params']
+        )
+        algo_class = PEARLSoftActorCritic
+    algorithm = algo_class(
         env=env,
         train_tasks=list(tasks[:variant['n_train_tasks']]),
         eval_tasks=list(tasks[-variant['n_eval_tasks']:]),
@@ -77,6 +102,12 @@ def experiment(variant):
         latent_dim=latent_dim,
         **variant['algo_params']
     )
+
+    if method == 'flow':
+        algorithm.recon_weight = variant['flow_params']['recon_weight']
+        algorithm.collapse_eps = variant['flow_params']['collapse_eps']
+        algorithm.cfm_weight = variant['flow_params']['cfm_weight']
+        algorithm.cfm_warmup_steps = variant['flow_params']['cfm_warmup_steps']
 
     # optionally load pre-trained weights
     if variant['path_to_weights'] is not None:
@@ -108,8 +139,17 @@ def experiment(variant):
         pickle_dir = experiment_log_dir + '/eval_trajectories'
         pathlib.Path(pickle_dir).mkdir(parents=True, exist_ok=True)
 
+    # optional Weights & Biases logging
+    use_wandb = variant['util_params'].get('use_wandb', False)
+    if use_wandb:
+        _setup_wandb(variant, experiment_log_dir)
+
     # run the algorithm
     algorithm.train()
+
+    if use_wandb:
+        import wandb
+        wandb.finish()
 
 def deep_update_dict(fr, to):
     ''' update dict of dicts with new values '''
@@ -120,6 +160,39 @@ def deep_update_dict(fr, to):
         else:
             to[k] = v
     return to
+
+
+def _to_numeric(d):
+    ''' best-effort convert a dict of stringified values to floats for logging '''
+    out = {}
+    for k, v in d.items():
+        try:
+            out[k] = float(v)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def _setup_wandb(variant, experiment_log_dir):
+    ''' init W&B and forward every dump_tabular() row to it '''
+    import wandb
+    from rlkit.core import logger
+    wandb.init(
+        project=variant['util_params'].get('wandb_project', 'pearl'),
+        name=os.path.basename(experiment_log_dir.rstrip('/')),
+        config=variant,
+        dir=experiment_log_dir,
+    )
+
+    def _log(tabular_dict):
+        metrics = _to_numeric(tabular_dict)
+        epoch = metrics.pop('Epoch', None)
+        if epoch is not None:
+            wandb.log(metrics, step=int(epoch))
+        else:
+            wandb.log(metrics)
+
+    logger.add_tabular_callback(_log)
 
 @click.command()
 @click.argument('config', default=None)

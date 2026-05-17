@@ -1,7 +1,8 @@
 import numpy as np
-from gym.envs.mujoco import HumanoidEnv as HumanoidEnv
 
+from .mujoco_env import MujocoEnv
 from . import register_env
+
 
 def mass_center(model, sim):
     mass = np.expand_dims(model.body_mass, 1)
@@ -10,12 +11,16 @@ def mass_center(model, sim):
 
 
 @register_env('humanoid-dir')
-class HumanoidDirEnv(HumanoidEnv):
+class HumanoidDirEnv(MujocoEnv):
+    """Humanoid env with a target heading direction, ported to the modern
+    ``mujoco`` bindings. The humanoid.xml model is loaded from gymnasium's
+    bundled assets.
+    """
 
     def __init__(self, task={}, n_tasks=2, randomize_tasks=True):
         self.tasks = self.sample_tasks(n_tasks)
         self.reset_task(0)
-        super(HumanoidDirEnv, self).__init__()
+        super().__init__('humanoid.xml', frame_skip=5)
 
     def step(self, action):
         pos_before = np.copy(mass_center(self.model, self.sim)[:2])
@@ -47,6 +52,14 @@ class HumanoidDirEnv(HumanoidEnv):
                                data.qfrc_actuator.flat,
                                data.cfrc_ext.flat])
 
+    def reset_model(self):
+        c = 0.01
+        self.set_state(
+            self.init_qpos + self.np_random.uniform(low=-c, high=c, size=self.model.nq),
+            self.init_qvel + self.np_random.uniform(low=-c, high=c, size=self.model.nv),
+        )
+        return self._get_obs()
+
     def get_all_task_idx(self):
         return range(len(self.tasks))
 
@@ -59,3 +72,6 @@ class HumanoidDirEnv(HumanoidEnv):
         directions = np.random.uniform(0., 2.0 * np.pi, size=(num_tasks,))
         tasks = [{'goal': d} for d in directions]
         return tasks
+
+    def viewer_setup(self):
+        pass

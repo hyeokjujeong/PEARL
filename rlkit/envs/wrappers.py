@@ -1,6 +1,6 @@
 import numpy as np
-from gym import Env
-from gym.spaces import Box
+from gymnasium import Env
+from gymnasium.spaces import Box
 
 from rlkit.core.serializable import Serializable
 
@@ -131,29 +131,29 @@ class NormalizedBoxEnv(ProxyEnv, Serializable):
 
 
 class CameraWrapper(object):
+    """Adds offscreen rgb rendering to a MuJoCo env, ported to the modern
+    ``mujoco`` bindings (gymnasium's MujocoRenderer).
 
-    def __init__(self, env,  *args, **kwargs):
+    Offscreen rendering needs a GL backend: set the env var ``MUJOCO_GL`` to
+    ``egl`` (headless GPU) or ``osmesa`` (CPU) before running.
+    """
+
+    def __init__(self, env, *args, **kwargs):
         self._wrapped_env = env
-        self.initialize_camera()
+
+    def _mujoco_env(self):
+        # unwrap NormalizedBoxEnv / ProxyEnv layers down to the raw MuJoCo env
+        env = self._wrapped_env
+        while hasattr(env, '_wrapped_env'):
+            env = env._wrapped_env
+        return env
 
     def get_image(self, width=256, height=256, camera_name=None):
-        # use sim.render to avoid MJViewer which doesn't seem to work without display
-        return self.sim.render(
-            width=width,
-            height=height,
-            camera_name=camera_name,
-        )
-
-    def initialize_camera(self):
-        import mujoco_py  # lazy: see module docstring at the top of the file
-        # set camera parameters for viewing
-        sim = self.sim
-        viewer = mujoco_py.MjRenderContextOffscreen(sim)
-        camera = viewer.cam
-        camera.type = 1
-        camera.trackbodyid = 0
-        camera.elevation = -20
-        sim.add_render_context(viewer)
+        # frame size / camera are fixed by the env's renderer config
+        # (default 480x480, free camera); width/height/camera_name are kept
+        # for call-site compatibility
+        env = self._mujoco_env()
+        return env.mujoco_renderer.render('rgb_array')
 
     def __getattr__(self, attrname):
         return getattr(self._wrapped_env, attrname)

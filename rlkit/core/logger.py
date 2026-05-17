@@ -146,6 +146,18 @@ def log(s, with_prefix=True, with_timestamp=True):
         sys.stdout.flush()
 
 
+_tabular_callbacks = []
+
+
+def add_tabular_callback(fn):
+    """Register a callback invoked with the tabular dict on every dump_tabular().
+
+    Used to forward per-iteration metrics to external sinks (e.g. W&B) without
+    coupling this module to them.
+    """
+    _tabular_callbacks.append(fn)
+
+
 def record_tabular(key, val):
     _tabular.append((_tabular_prefix_str + str(key), str(val)))
 
@@ -241,6 +253,12 @@ def dump_tabular(*args, **kwargs):
                 _tabular_header_written.add(tabular_fd)
             writer.writerow(tabular_dict)
             tabular_fd.flush()
+        for callback in _tabular_callbacks:
+            try:
+                callback(tabular_dict)
+            except Exception as e:
+                print('WARNING: tabular callback failed ({}: {})'.format(
+                    type(e).__name__, e))
         del _tabular[:]
 
 

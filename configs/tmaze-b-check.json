@@ -1,0 +1,25 @@
+{
+    "env_name": "tmaze-passive",
+    "n_train_tasks": 2,
+    "n_eval_tasks": 2,
+    "env_params": {
+        "n_tasks": 2,
+        "corridor_length": 10
+    },
+    "algo_params": {
+        "max_path_length": 11,
+        "num_iterations": 2,
+        "num_initial_steps": 200,
+        "num_tasks_sample": 2,
+        "num_steps_prior": 50,
+        "num_extra_rl_steps_posterior": 50,
+        "num_train_steps_per_itr": 50,
+        "num_evals": 1,
+        "num_steps_per_eval": 22,
+        "batch_size": 64,
+        "meta_batch": 4
+    },
+    "util_params": {
+        "use_gpu": false
+    }
+}

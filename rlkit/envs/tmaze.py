@@ -22,14 +22,13 @@ PEARL-specific deviations (guideline §7-1):
 """
 
 import numpy as np
-import gym
-from gym import spaces
-from gym.utils import seeding
+from gymnasium import Env, spaces
+from gymnasium.utils import seeding
 
 from . import register_env
 
 
-class TMazeEnv(gym.Env):
+class TMazeEnv(Env):
     """Core T-MAZE environment. `mode` selects passive vs active.
 
     External-facing args: `corridor_length`, `mode`, `n_tasks` (must be 2).

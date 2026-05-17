@@ -2,8 +2,6 @@ import os
 import importlib
 import warnings
 
-import gym.error
-
 
 ENVS = {}
 

@@ -29,7 +29,7 @@ This repository is based on [rlkit](https://github.com/vitchyr/rlkit).
 The original environment (`docker/environment.yml`) is pinned to 2019 builds
 (python 3.5, torch 1.0.1, CUDA 10, `mujoco-py` 1.50) and no longer installs on
 current systems or runs on recent GPUs. A modernized dependency set is provided
-in `requirements-modern.txt`. It uses python 3.11, recent PyTorch, **gymnasium**
+in `requirements.txt`. It uses python 3.11, recent PyTorch, **gymnasium**
 instead of `gym`, and the DeepMind **`mujoco`** package instead of `mujoco-py`
 (so no MuJoCo license key is needed).
 
@@ -37,7 +37,7 @@ instead of `gym`, and the DeepMind **`mujoco`** package instead of `mujoco-py`
 conda create -n pearl python=3.11 -y
 conda activate pearl
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-pip install -r requirements-modern.txt
+pip install -r requirements.txt
 python launch_experiment.py ./configs/point-robot.json
 ```
 

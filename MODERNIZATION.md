@@ -15,7 +15,7 @@ families train again on a current stack.
 - DeepMind **`mujoco`** package instead of `mujoco-py` — no MuJoCo license key,
   no separate MuJoCo200/131 binary install
 
-See `requirements-modern.txt` for the exact set and install steps.
+See `requirements.txt` for the exact set and install steps.
 
 ## Code changes
 

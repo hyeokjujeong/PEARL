@@ -24,3 +24,10 @@ __pycache__
 CLAUDE.md
 TMAZE_guideline_v*.md
 .claude/
+
+# Personal research notes & generated figures (not shared)
+/BRIEF.md
+/FLOW_FILTER_DESIGN.md
+/FLOW_GROUNDING_AND_CFM.md
+/FLOW_LOSS_STRUCTURE.md
+/figures/

@@ -60,6 +60,15 @@ default_config = dict(
         collapse_eps=1e-4,  # c_variance below this => latent collapse, abort
         cfm_weight=1.0,     # weight of the CFM (flow-matching) loss
         cfm_warmup_steps=0, # train steps of recon-only before CFM turns on
+        # ---- paper-method additions (Eq. 5-7); defaults preserve current run --
+        training_mode='current',  # 'current' | 'paper' | 'paper+recon'
+        use_prior_flow=False,     # learn unconditional v_phi for the marginal p(c)
+        prior_hidden=128,         # hidden width of the prior flow v_phi
+        prior_weight=1.0,         # alpha' in Eq. 7 (weight on L_prior)
+        # ---- numerical guards / ablation knobs (paper Plan §4 stage 4) -------
+        max_context=16,           # subsample context for fused ODE; None = use ALL transitions (paper-faithful)
+        vel_clip=10.0,            # tanh-squash on fused velocity norm (MVP guard); set high to effectively disable
+        tau_eps=0.05,             # ODE integration interval is [tau_eps, 1-tau_eps]
     ),
 )
 

@@ -33,13 +33,32 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.collapse_eps = 1e-4
         self.cfm_weight = 1.0       # weight of the CFM (flow-matching) loss
         self.cfm_warmup_steps = 0   # train steps of recon-only before CFM turns on
+        # paper-mode additions (defaults preserve original 'current' behaviour)
+        # NOTE: name is `flow_training_mode` (not `training_mode`) because the
+        # base PEARLSoftActorCritic.training_mode is a *method* that toggles
+        # train()/eval() on all networks; shadowing it with a string would
+        # break MetaRLAlgorithm.train(). The JSON config key stays
+        # `flow_params.training_mode` for ergonomics.
+        self.flow_training_mode = 'current'   # 'current' | 'paper' | 'paper+recon'
+        self.prior_weight = 1.0          # alpha' in Eq. 7
+        # `prior_flow` and `prior_optimizer` are attached by the launcher when
+        # a learned prior is enabled; left None otherwise.
+        if not hasattr(self, 'prior_flow'):
+            self.prior_flow = None
+        if not hasattr(self, 'prior_optimizer'):
+            self.prior_optimizer = None
 
     def get_epoch_snapshot(self, epoch):
         snapshot = super().get_epoch_snapshot(epoch)
         snapshot['decoder'] = self.agent.decoder.state_dict()
+        if self.prior_flow is not None:
+            snapshot['prior_flow'] = self.prior_flow.state_dict()
         return snapshot
 
     def _take_step(self, indices, context):
+        # paper-mode dispatch: keep the original 'current' path untouched
+        if self.flow_training_mode in ('paper', 'paper+recon'):
+            return self._take_step_paper(indices, context)
         # data is (task, batch, feat)
         obs, actions, rewards, next_obs, terms = self.sample_sac(indices)
 
@@ -137,6 +156,142 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             self.eval_statistics['recon_loss_r'] = float(ptu.get_numpy(recon_r_loss))
             self.eval_statistics['recon_loss_obs'] = float(ptu.get_numpy(recon_obs_loss))
             self.eval_statistics['cfm_loss'] = float(ptu.get_numpy(cfm_loss))
+            self.eval_statistics['c_norm'] = float(np.mean(np.linalg.norm(z, axis=-1)))
+            self.eval_statistics['c_variance'] = c_variance
+            self.eval_statistics['flow_encoder_grad_norm'] = enc_grad_norm
+            self.eval_statistics['QF Loss'] = np.mean(ptu.get_numpy(qf_loss))
+            self.eval_statistics['VF Loss'] = np.mean(ptu.get_numpy(vf_loss))
+            self.eval_statistics['Policy Loss'] = np.mean(ptu.get_numpy(policy_loss))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'Q Predictions', ptu.get_numpy(q1_pred)))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'V Predictions', ptu.get_numpy(v_pred)))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'Log Pis', ptu.get_numpy(log_pi)))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'Policy mu', ptu.get_numpy(policy_mean)))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'Policy log std', ptu.get_numpy(policy_log_std)))
+            if c_variance < self.collapse_eps:
+                print('ERROR: latent collapsed (c_variance={:.3e} < {:.1e})'.format(
+                    c_variance, self.collapse_eps))
+
+    # ---------------------------------------------------------------------
+    # Paper-accurate bootstrapped EM training step (Sec 3.2, Eqs. 5-7).
+    # Selected via flow_training_mode in {'paper', 'paper+recon'}; the original
+    # _take_step is left intact for the 'current' mode.
+    # ---------------------------------------------------------------------
+    def _take_step_paper(self, indices, context):
+        obs, actions, rewards, next_obs, terms = self.sample_sac(indices)
+        t, b, _ = obs.size()
+        obs_flat = obs.view(t * b, -1)
+        actions_flat = actions.view(t * b, -1)
+        next_obs_flat = next_obs.view(t * b, -1)
+        rewards_raw = rewards.view(t * b, -1)
+        terms_flat = terms.view(t * b, -1)
+
+        encoder = self.agent.context_encoder
+
+        # ---- E-step: stop-grad ODE pass -> pseudo-target c_hat ----------
+        c_hat = encoder.e_step_sample(context).detach()      # (num_tasks, latent)
+        self.agent.z = c_hat                                  # for log/diagnostics
+        # repeat c_hat per transition in the batch; matches PEARLAgent.forward
+        task_z = c_hat.unsqueeze(1).expand(t, b, -1).reshape(t * b, -1)
+
+        # ---- run policy on (obs, c_hat) ---------------------------------
+        in_ = torch.cat([obs_flat, task_z], dim=1)
+        policy_outputs = self.agent.policy(in_, reparameterize=True, return_log_prob=True)
+        new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
+
+        # ---- M-step: per-transition CFM (Eq. 6) on v_theta --------------
+        sub_context = encoder._subsampled_context             # same trans. as c_hat
+        cfm_loss = encoder.per_transition_cfm_loss(sub_context, c_hat)
+        cfm_w = self.cfm_weight if self._n_train_steps_total >= self.cfm_warmup_steps else 0.0
+        encoder_total = cfm_w * cfm_loss
+
+        self.context_optimizer.zero_grad()
+        if encoder_total.requires_grad:
+            encoder_total.backward()
+            enc_grad_norm = sum(
+                p.grad.norm().item()
+                for p in encoder.parameters()
+                if p.grad is not None
+            )
+            self.context_optimizer.step()
+        else:
+            enc_grad_norm = 0.0
+
+        # ---- M-step: prior CFM on the marginal of c_hat (L_prior) -------
+        if self.prior_flow is not None and self.prior_optimizer is not None:
+            prior_loss = self.prior_flow.cfm_loss(c_hat)
+            self.prior_optimizer.zero_grad()
+            (self.prior_weight * prior_loss).backward()
+            self.prior_optimizer.step()
+        else:
+            prior_loss = torch.zeros((), device=ptu.device)
+
+        # ---- (optional) auxiliary decoder loss in 'paper+recon' mode -----
+        # task_z is detached here, so the decoder loss only updates the
+        # decoder itself — the flow encoder/prior are unaffected.
+        if self.flow_training_mode == 'paper+recon':
+            pred_next_obs, pred_reward = self.agent.decoder(obs_flat, actions_flat, task_z)
+            recon_obs_loss = F.mse_loss(pred_next_obs, next_obs_flat)
+            recon_r_loss = F.mse_loss(pred_reward, rewards_raw)
+            recon_loss = recon_obs_loss + recon_r_loss
+            self.decoder_optimizer.zero_grad()
+            (self.recon_weight * recon_loss).backward()
+            self.decoder_optimizer.step()
+        else:
+            recon_loss = torch.zeros((), device=ptu.device)
+            recon_obs_loss = torch.zeros((), device=ptu.device)
+            recon_r_loss = torch.zeros((), device=ptu.device)
+
+        # ---- SAC losses (task_z already detached) -----------------------
+        q1_pred = self.qf1(obs_flat, actions_flat, task_z)
+        q2_pred = self.qf2(obs_flat, actions_flat, task_z)
+        v_pred = self.vf(obs_flat, task_z)
+        with torch.no_grad():
+            target_v_values = self.target_vf(next_obs_flat, task_z)
+
+        self.qf1_optimizer.zero_grad()
+        self.qf2_optimizer.zero_grad()
+        rewards_flat = rewards_raw * self.reward_scale
+        q_target = rewards_flat + (1. - terms_flat) * self.discount * target_v_values
+        qf_loss = torch.mean((q1_pred - q_target) ** 2) + torch.mean((q2_pred - q_target) ** 2)
+        qf_loss.backward()
+        self.qf1_optimizer.step()
+        self.qf2_optimizer.step()
+
+        min_q_new_actions = self._min_q(obs_flat, new_actions, task_z)
+
+        v_target = min_q_new_actions - log_pi
+        vf_loss = self.vf_criterion(v_pred, v_target.detach())
+        self.vf_optimizer.zero_grad()
+        vf_loss.backward()
+        self.vf_optimizer.step()
+        self._update_target_network()
+
+        policy_loss = (log_pi - min_q_new_actions).mean()
+        mean_reg_loss = self.policy_mean_reg_weight * (policy_mean ** 2).mean()
+        std_reg_loss = self.policy_std_reg_weight * (policy_log_std ** 2).mean()
+        pre_tanh_value = policy_outputs[-1]
+        pre_activation_reg_loss = self.policy_pre_activation_weight * (
+            (pre_tanh_value ** 2).sum(dim=1).mean()
+        )
+        policy_loss = policy_loss + mean_reg_loss + std_reg_loss + pre_activation_reg_loss
+        self.policy_optimizer.zero_grad()
+        policy_loss.backward()
+        self.policy_optimizer.step()
+
+        if self.eval_statistics is None:
+            self.eval_statistics = OrderedDict()
+            z = ptu.get_numpy(self.agent.z)
+            c_variance = float(np.mean(np.var(z, axis=0)))
+            self.eval_statistics['recon_loss'] = float(ptu.get_numpy(recon_loss))
+            self.eval_statistics['recon_loss_r'] = float(ptu.get_numpy(recon_r_loss))
+            self.eval_statistics['recon_loss_obs'] = float(ptu.get_numpy(recon_obs_loss))
+            self.eval_statistics['cfm_loss'] = float(ptu.get_numpy(cfm_loss))
+            self.eval_statistics['prior_cfm_loss'] = float(ptu.get_numpy(prior_loss))
             self.eval_statistics['c_norm'] = float(np.mean(np.linalg.norm(z, axis=-1)))
             self.eval_statistics['c_variance'] = c_variance
             self.eval_statistics['flow_encoder_grad_norm'] = enc_grad_norm

@@ -40,11 +40,24 @@ def experiment(variant):
     method = variant.get('method', 'baseline')
     if method == 'flow':
         from rlkit.torch.flow.flow_encoder import FlowContextEncoder
+        # optional learned prior v_phi (paper Eq. 5). When disabled, the encoder
+        # uses the N(0,I) closed-form prior score (-c) -- the legacy MVP path.
+        prior_flow = None
+        if variant['flow_params'].get('use_prior_flow', False):
+            from rlkit.torch.flow.prior_flow import PriorFlow
+            prior_flow = PriorFlow(
+                latent_dim=latent_dim,
+                hidden_dim=variant['flow_params']['prior_hidden'],
+            )
         context_encoder = FlowContextEncoder(
             context_dim=context_encoder_input_dim,
             latent_dim=latent_dim,
             hidden_dim=variant['flow_params']['encoder_hidden'],
             n_ode_steps=variant['flow_params']['n_ode_steps'],
+            max_context=variant['flow_params'].get('max_context', 16),
+            vel_clip=variant['flow_params'].get('vel_clip', 10.0),
+            tau_eps=variant['flow_params'].get('tau_eps', 0.05),
+            prior_flow=prior_flow,
         )
     else:
         context_encoder = encoder_model(
@@ -83,6 +96,7 @@ def experiment(variant):
         )
         agent = FlowPEARLAgent(
             latent_dim, context_encoder, policy, decoder,
+            prior_flow=prior_flow,
             **variant['algo_params']
         )
         algo_class = FlowPEARLSoftActorCritic
@@ -108,6 +122,17 @@ def experiment(variant):
         algorithm.collapse_eps = variant['flow_params']['collapse_eps']
         algorithm.cfm_weight = variant['flow_params']['cfm_weight']
         algorithm.cfm_warmup_steps = variant['flow_params']['cfm_warmup_steps']
+        # paper-mode additions
+        # base PEARLSoftActorCritic.training_mode is a method; use a distinct
+        # attribute name to avoid shadowing it. JSON config key is unchanged.
+        algorithm.flow_training_mode = variant['flow_params'].get('training_mode', 'current')
+        algorithm.prior_weight = variant['flow_params'].get('prior_weight', 1.0)
+        algorithm.prior_flow = prior_flow
+        if prior_flow is not None:
+            algorithm.prior_optimizer = torch.optim.Adam(
+                prior_flow.parameters(),
+                lr=variant['algo_params']['context_lr'],
+            )
 
     # optionally load pre-trained weights
     if variant['path_to_weights'] is not None:

@@ -21,13 +21,25 @@ class FlowPEARLAgent(PEARLAgent):
       - networks        : include the decoder (so .to()/snapshot see it)
     """
 
-    def __init__(self, latent_dim, context_encoder, policy, decoder, **kwargs):
+    def __init__(self, latent_dim, context_encoder, policy, decoder,
+                 prior_flow=None, **kwargs):
         super().__init__(latent_dim, context_encoder, policy, **kwargs)
         self.decoder = decoder
+        # Optional learned prior v_phi (paper Eq. 5 / Sec 3.2). Held here so it
+        # appears in `.networks` (moved to device, included in snapshots) and
+        # so `clear_z` can sample c ~ p(c) from the learned prior instead of
+        # the N(0,I) fallback.
+        self.prior_flow = prior_flow
 
     def clear_z(self, num_tasks=1):
-        ''' reset c to a prior sample N(0, I); used only before any context '''
-        self.z = ptu.randn(num_tasks, self.latent_dim)
+        ''' reset c to a prior sample; uses the learned v_phi when present. '''
+        # getattr with default: PEARLAgent.__init__ calls clear_z() BEFORE
+        # FlowPEARLAgent.__init__ has set self.prior_flow.
+        prior_flow = getattr(self, 'prior_flow', None)
+        if prior_flow is not None:
+            self.z = prior_flow.sample(num_tasks)
+        else:
+            self.z = ptu.randn(num_tasks, self.latent_dim)
         self.context = None
         self.context_encoder.reset(num_tasks)
 
@@ -51,4 +63,7 @@ class FlowPEARLAgent(PEARLAgent):
 
     @property
     def networks(self):
-        return [self.context_encoder, self.policy, self.decoder]
+        nets = [self.context_encoder, self.policy, self.decoder]
+        if self.prior_flow is not None:
+            nets.append(self.prior_flow)
+        return nets

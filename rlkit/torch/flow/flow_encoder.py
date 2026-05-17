@@ -15,7 +15,14 @@ class FlowContextEncoder(nn.Module):
     Composition (per the proposal):
         s_fused(c_tau, tau) = sum_i s_theta(c_tau, tau | x_i) - (t-1) s_prior
     with the velocity<->score relations of the OT interpolant
-        s = -(c - tau v) / (1-tau)^2 ,   v = (c + s (1-tau)^2) / tau
+        s = -(c - tau v) / (1-tau) ,   v = (c + s (1-tau)) / tau
+    NOTE: paper draft Eq. 3 has (1-tau)^2; the correct marginal relation has
+    (1-tau)^1. The conditional Gaussian score N(tau z1, (1-tau)^2 I) has
+    (1-tau)^2 in the denominator, but Tweedie marginalization cancels one
+    factor of (1-tau). Derivation: with E[z1|z_tau] = z + (1-tau) v,
+        s = -(z - tau E[z1|z_tau]) / (1-tau)^2
+          = -((1-tau)z - tau(1-tau)v) / (1-tau)^2
+          = -(z - tau v) / (1-tau).
 
     ⚠️ KNOWN-APPROXIMATE / GUARDS (flagged for review):
       - Score composition along the interpolation path is NOT exact (noising
@@ -42,7 +49,8 @@ class FlowContextEncoder(nn.Module):
     """
 
     def __init__(self, context_dim, latent_dim, hidden_dim=128,
-                 n_ode_steps=5, max_context=16, tau_eps=0.05, vel_clip=10.0):
+                 n_ode_steps=5, max_context=16, tau_eps=0.05, vel_clip=10.0,
+                 prior_flow=None):
         super().__init__()
         self.context_dim = context_dim
         self.latent_dim = latent_dim
@@ -58,6 +66,13 @@ class FlowContextEncoder(nn.Module):
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, latent_dim),
         )
+        # Optional learned prior flow v_phi (paper Eq. 5). When None, the prior
+        # score falls back to the N(0,I) closed form (-c), matching the original
+        # MVP behaviour.
+        # NOTE: kept as a plain attribute (not a submodule) so the prior's
+        # parameters stay under the agent's `networks` list and aren't
+        # double-registered / double-optimized via the encoder.
+        object.__setattr__(self, 'prior_flow', prior_flow)
         # the (possibly subsampled) context of the most recent forward() —
         # cfm_loss must regress against the SAME context that produced c.
         self._subsampled_context = None
@@ -84,10 +99,21 @@ class FlowContextEncoder(nn.Module):
 
         one_minus = max(1.0 - tau, self.tau_eps)
         tau_safe = max(tau, self.tau_eps)
-        # per-transition expert scores, summed; minus the prior overcounting
-        s_per = -(c_bc - tau * v_per) / (one_minus ** 2)
-        s_fused = s_per.sum(dim=1) - (t - 1) * (-c)                 # s_prior = -c
-        v_fused = (c + s_fused * (one_minus ** 2)) / tau_safe
+        # per-transition expert scores, summed; minus the prior overcounting.
+        # If a learned prior flow is attached, use its score; otherwise fall
+        # back to the N(0,I) closed form (s_prior = -c).
+        # OT marginal relation: s = -(c - tau v) / (1-tau); inverse:
+        # v = (c + s (1-tau)) / tau. (Paper draft Eq. 3 has (1-tau)^2 -- typo.)
+        s_per = -(c_bc - tau * v_per) / one_minus
+        if self.prior_flow is not None:
+            # Paper spec: phi is updated ONLY by L_prior, not by any loss that
+            # flows through the encoder. Detach so encoder/decoder/fused-CFM
+            # gradients do not leak into the prior flow's parameters.
+            s_prior = self.prior_flow.score(c, tau).detach()
+        else:
+            s_prior = -c
+        s_fused = s_per.sum(dim=1) - (t - 1) * s_prior
+        v_fused = (c + s_fused * one_minus) / tau_safe
 
         # MVP numerical guard: smoothly squash the velocity norm with tanh.
         # A hard clamp would zero the gradient for every task above the
@@ -100,7 +126,11 @@ class FlowContextEncoder(nn.Module):
     def forward(self, context):
         ''' context: (num_tasks, seq_len, context_dim) -> c: (num_tasks, latent) '''
         n, t, _ = context.shape
-        if t > self.max_context:
+        # max_context=None -> use all transitions (paper-faithful). The cap is
+        # an MVP guard against the (t-1)*s_prior term exploding under the
+        # hard-coded Gaussian prior; with a learned v_phi the correction is
+        # calibrated and the cap can usually be removed.
+        if self.max_context is not None and t > self.max_context:
             idx = torch.randperm(t, device=context.device)[:self.max_context]
             context = context[:, idx, :]
         self._subsampled_context = context                 # for cfm_loss
@@ -132,3 +162,36 @@ class FlowContextEncoder(nn.Module):
         v = self._fused_velocity(c_tau, tau, context)
         target = c1 - c0
         return ((v - target) ** 2).mean()
+
+    def per_transition_cfm_loss(self, context, c1):
+        """Paper Eq. 6: per-transition CFM loss on v_theta(c_tau, tau | x_i).
+
+        Regresses the *single-transition* velocity field (vnet), NOT the fused
+        composition, against the OT target (c1 - c0) for each transition i in
+        the episode. This is what trains each per-transition expert correctly;
+        the inference-time PoE composition is then the product of well-trained
+        experts.
+
+        c1 is the bootstrap target (sg[c_hat]); caller passes the same
+        subsampled context that produced c_hat (`self._subsampled_context`).
+        """
+        n, t, _ = context.shape
+        c0 = ptu.randn(n, self.latent_dim)
+        tau = self.tau_eps + (1.0 - 2.0 * self.tau_eps) * float(torch.rand(1))
+        c_tau = (1.0 - tau) * c0 + tau * c1.detach()                   # (n, latent)
+
+        c_bc = c_tau.unsqueeze(1).expand(n, t, self.latent_dim)
+        tau_emb = self._tau_embed(tau).view(1, 1, -1).expand(n, t, -1)
+        v_per = self.vnet(torch.cat([c_bc, tau_emb, context], dim=-1))  # (n,t,latent)
+        target = (c1.detach() - c0).unsqueeze(1).expand(n, t, self.latent_dim)
+        return ((v_per - target) ** 2).mean()
+
+    @torch.no_grad()
+    def e_step_sample(self, context):
+        """Paper E-step: fused-ODE pass under stop_grad to produce c_hat.
+
+        Also caches the (subsampled) context as `_subsampled_context` so the
+        M-step's per-transition CFM regresses against the SAME transitions
+        that produced c_hat. Returns c_hat shape (num_tasks, latent_dim).
+        """
+        return self.forward(context)

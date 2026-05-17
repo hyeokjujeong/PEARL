@@ -107,6 +107,19 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.context_optimizer.step()
         self.decoder_optimizer.step()
 
+        # ---- prior CFM (only if a learned v_phi is attached) -----------------
+        # Trains v_phi on the marginal of the bootstrap targets c1, parallel to
+        # what `_take_step_paper` does. Without this, an attached prior_flow in
+        # `current` mode stays at random init and the (t-1)*s_phi term in the
+        # fused ODE becomes noise -- strictly worse than the N(0,I) fallback.
+        if self.prior_flow is not None and self.prior_optimizer is not None:
+            prior_loss = self.prior_flow.cfm_loss(c1)
+            self.prior_optimizer.zero_grad()
+            (self.prior_weight * prior_loss).backward()
+            self.prior_optimizer.step()
+        else:
+            prior_loss = torch.zeros((), device=ptu.device)
+
         # ---- SAC losses ------------------------------------------------------
         # task_z detached: the encoder receives no gradient from the critic.
         task_z = task_z.detach()
@@ -156,6 +169,7 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             self.eval_statistics['recon_loss_r'] = float(ptu.get_numpy(recon_r_loss))
             self.eval_statistics['recon_loss_obs'] = float(ptu.get_numpy(recon_obs_loss))
             self.eval_statistics['cfm_loss'] = float(ptu.get_numpy(cfm_loss))
+            self.eval_statistics['prior_cfm_loss'] = float(ptu.get_numpy(prior_loss))
             self.eval_statistics['c_norm'] = float(np.mean(np.linalg.norm(z, axis=-1)))
             self.eval_statistics['c_variance'] = c_variance
             self.eval_statistics['flow_encoder_grad_norm'] = enc_grad_norm

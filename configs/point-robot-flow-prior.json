@@ -22,7 +22,9 @@
     },
     "flow_params": {
         "training_mode": "current",
-        "use_prior_flow": false,
+        "use_prior_flow": true,
+        "prior_hidden": 128,
+        "prior_weight": 1.0,
         "cfm_weight": 1.0,
         "cfm_warmup_steps": 0,
         "recon_weight": 1.0,

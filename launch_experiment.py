@@ -106,6 +106,8 @@ def experiment(variant):
     if method == 'flow':
         algorithm.recon_weight = variant['flow_params']['recon_weight']
         algorithm.collapse_eps = variant['flow_params']['collapse_eps']
+        algorithm.cfm_weight = variant['flow_params']['cfm_weight']
+        algorithm.cfm_warmup_steps = variant['flow_params']['cfm_warmup_steps']
 
     # optionally load pre-trained weights
     if variant['path_to_weights'] is not None:

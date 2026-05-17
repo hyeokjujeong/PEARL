@@ -58,6 +58,8 @@ default_config = dict(
         n_ode_steps=5,      # ODE integration steps for sampling c (Stage 2+)
         recon_weight=1.0,   # weight of the decoder reconstruction (ELBO) loss
         collapse_eps=1e-4,  # c_variance below this => latent collapse, abort
+        cfm_weight=1.0,     # weight of the CFM (flow-matching) loss
+        cfm_warmup_steps=0, # train steps of recon-only before CFM turns on
     ),
 )
 

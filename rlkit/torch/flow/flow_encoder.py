@@ -58,6 +58,9 @@ class FlowContextEncoder(nn.Module):
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, latent_dim),
         )
+        # the (possibly subsampled) context of the most recent forward() —
+        # cfm_loss must regress against the SAME context that produced c.
+        self._subsampled_context = None
 
     def reset(self, num_tasks=1):
         # no recurrent / hidden state
@@ -100,6 +103,7 @@ class FlowContextEncoder(nn.Module):
         if t > self.max_context:
             idx = torch.randperm(t, device=context.device)[:self.max_context]
             context = context[:, idx, :]
+        self._subsampled_context = context                 # for cfm_loss
         c = ptu.randn(n, self.latent_dim)                  # base sample c(tau_eps)
         taus = torch.linspace(self.tau_eps, 1.0 - self.tau_eps,
                               self.n_ode_steps + 1)
@@ -108,3 +112,23 @@ class FlowContextEncoder(nn.Module):
             dt = float(taus[i + 1] - taus[i])
             c = c + dt * self._fused_velocity(c, tau, context)      # Euler step
         return c
+
+    def cfm_loss(self, context, c1):
+        """Bootstrap-EM conditional-flow-matching loss.
+
+        Regresses the *composed* velocity field ``_fused_velocity`` (the exact
+        quantity the ODE integrates) toward the OT target velocity (c1 - c0),
+        so what CFM trains == what the ODE uses. c1 is the bootstrap target
+        (sg[c]); the caller must pass the SAME subsampled context that produced
+        it (``self._subsampled_context``).
+
+        A single scalar tau is sampled per call (reuses the scalar-tau path of
+        _tau_embed/_fused_velocity); the [0,1] interval is covered across steps.
+        """
+        n = context.shape[0]
+        c0 = ptu.randn(n, self.latent_dim)
+        tau = self.tau_eps + (1.0 - 2.0 * self.tau_eps) * float(torch.rand(1))
+        c_tau = (1.0 - tau) * c0 + tau * c1
+        v = self._fused_velocity(c_tau, tau, context)
+        target = c1 - c0
+        return ((v - target) ** 2).mean()

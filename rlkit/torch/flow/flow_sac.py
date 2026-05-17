@@ -31,6 +31,8 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         # overridden from flow_params by the launcher
         self.recon_weight = 1.0
         self.collapse_eps = 1e-4
+        self.cfm_weight = 1.0       # weight of the CFM (flow-matching) loss
+        self.cfm_warmup_steps = 0   # train steps of recon-only before CFM turns on
 
     def get_epoch_snapshot(self, epoch):
         snapshot = super().get_epoch_snapshot(epoch)
@@ -65,9 +67,19 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         recon_loss = recon_obs_loss + recon_r_loss
         elbo_loss = self.recon_weight * recon_loss
 
+        # ---- CFM (bootstrap-EM) -- trains v_theta as a real velocity field ---
+        # target c1 = sg[inferred c]; regress the composed velocity field that
+        # the ODE actually integrates toward the OT target velocity (c1 - c0).
+        # decoder grounding (above) anchors c1, so the self-target is not free.
+        encoder = self.agent.context_encoder
+        c1 = self.agent.z.detach()
+        cfm_loss = encoder.cfm_loss(encoder._subsampled_context, c1)
+        cfm_w = self.cfm_weight if self._n_train_steps_total >= self.cfm_warmup_steps else 0.0
+        encoder_total = elbo_loss + cfm_w * cfm_loss
+
         self.context_optimizer.zero_grad()
         self.decoder_optimizer.zero_grad()
-        elbo_loss.backward()
+        encoder_total.backward()
         enc_grad_norm = sum(
             p.grad.norm().item()
             for p in self.agent.context_encoder.parameters()
@@ -124,6 +136,7 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             self.eval_statistics['recon_loss'] = float(ptu.get_numpy(recon_loss))
             self.eval_statistics['recon_loss_r'] = float(ptu.get_numpy(recon_r_loss))
             self.eval_statistics['recon_loss_obs'] = float(ptu.get_numpy(recon_obs_loss))
+            self.eval_statistics['cfm_loss'] = float(ptu.get_numpy(cfm_loss))
             self.eval_statistics['c_norm'] = float(np.mean(np.linalg.norm(z, axis=-1)))
             self.eval_statistics['c_variance'] = c_variance
             self.eval_statistics['flow_encoder_grad_norm'] = enc_grad_norm

@@ -17,29 +17,6 @@ def _product_of_gaussians(mus, sigmas_squared):
     return mu, sigma_squared
 
 
-def _mean_of_gaussians(mus, sigmas_squared):
-    '''
-    compute mu, sigma of mean of gaussians
-    '''
-    mu = torch.mean(mus, dim=0)
-    sigma_squared = torch.mean(sigmas_squared, dim=0)
-    return mu, sigma_squared
-
-
-def _natural_to_canonical(n1, n2):
-    ''' convert from natural to canonical gaussian parameters '''
-    mu = -0.5 * n1 / n2
-    sigma_squared = -0.5 * 1 / n2
-    return mu, sigma_squared
-
-
-def _canonical_to_natural(mu, sigma_squared):
-    ''' convert from canonical to natural gaussian parameters '''
-    n1 = mu / sigma_squared
-    n2 = -0.5 * 1 / sigma_squared
-    return n1, n2
-
-
 class PEARLAgent(nn.Module):
 
     def __init__(self,

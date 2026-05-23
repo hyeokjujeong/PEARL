@@ -57,8 +57,6 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
         self.latent_dim = latent_dim
         self.qf_criterion = nn.MSELoss()
         self.vf_criterion = nn.MSELoss()
-        self.vib_criterion = nn.MSELoss()
-        self.l2_reg_criterion = nn.MSELoss()
         self.kl_lambda = kl_lambda
 
         self.use_information_bottleneck = use_information_bottleneck

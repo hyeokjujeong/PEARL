@@ -57,7 +57,6 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         """
         self.env = env
         self.agent = agent
-        self.exploration_agent = agent # Can potentially use a different policy purely for exploration rather than also solving tasks, currently not being used
         self.train_tasks = train_tasks
         self.eval_tasks = eval_tasks
         self.meta_batch = meta_batch
@@ -120,22 +119,6 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         self._old_table_keys = None
         self._current_path_builder = PathBuilder()
         self._exploration_paths = []
-
-    def make_exploration_policy(self, policy):
-         return policy
-
-    def make_eval_policy(self, policy):
-        return policy
-
-    def sample_task(self, is_eval=False):
-        '''
-        sample task randomly
-        '''
-        if is_eval:
-            idx = np.random.randint(len(self.eval_tasks))
-        else:
-            idx = np.random.randint(len(self.train_tasks))
-        return idx
 
     def train(self):
         '''
@@ -316,15 +299,6 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         logger.pop_prefix()
 
     ##### Snapshotting utils #####
-    def get_epoch_snapshot(self, epoch):
-        data_to_save = dict(
-            epoch=epoch,
-            exploration_policy=self.exploration_policy,
-        )
-        if self.save_environment:
-            data_to_save['env'] = self.training_env
-        return data_to_save
-
     def get_extra_data_to_save(self, epoch):
         """
         Save things that shouldn't be saved every snapshot but rather

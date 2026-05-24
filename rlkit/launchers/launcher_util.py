@@ -1,23 +1,16 @@
 import json
 import os
 import os.path as osp
-import shutil
-import pickle
 import random
 import sys
-import time
-import uuid
-import click
 from collections import namedtuple
 
-import __main__ as main
 import datetime
 import dateutil.tz
 import numpy as np
 
 from rlkit.core import logger
 from rlkit.launchers import config
-from rlkit.torch.pytorch_util import set_gpu_mode
 
 GitInfo = namedtuple('GitInfo', ['code_diff', 'commit_hash', 'branch_name'])
 
@@ -45,136 +38,6 @@ def recursive_items(dictionary):
         yield key, value
         if type(value) is dict:
             yield from recursive_items(value)
-
-
-def create_mounts(
-        mode,
-        base_log_dir,
-        sync_interval=180,
-        local_input_dir_to_mount_point_dict=None,
-):
-    if local_input_dir_to_mount_point_dict is None:
-        local_input_dir_to_mount_point_dict = {}
-    else:
-        raise NotImplementedError("TODO(vitchyr): Implement this")
-
-    mounts = [m for m in CODE_MOUNTS]
-    for dir, mount_point in local_input_dir_to_mount_point_dict.items():
-        mounts.append(mount.MountLocal(
-            local_dir=dir,
-            mount_point=mount_point,
-            pythonpath=False,
-        ))
-
-    if mode != 'local':
-        for m in NON_CODE_MOUNTS:
-            mounts.append(m)
-
-    if mode == 'ec2':
-        output_mount = mount.MountS3(
-            s3_path='',
-            mount_point=config.OUTPUT_DIR_FOR_DOODAD_TARGET,
-            output=True,
-            sync_interval=sync_interval,
-        )
-    elif mode == 'local':
-        output_mount = mount.MountLocal(
-            local_dir=base_log_dir,
-            mount_point=None,  # For purely local mode, skip mounting.
-            output=True,
-        )
-    elif mode == 'local_docker':
-        output_mount = mount.MountLocal(
-            local_dir=base_log_dir,
-            mount_point=config.OUTPUT_DIR_FOR_DOODAD_TARGET,
-            output=True,
-        )
-    else:
-        raise NotImplementedError("Mode not supported: {}".format(mode))
-    mounts.append(output_mount)
-    return mounts
-
-
-def save_experiment_data(dictionary, log_dir):
-    with open(log_dir + '/experiment.pkl', 'wb') as handle:
-        pickle.dump(dictionary, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-
-def run_experiment_here(
-        experiment_function,
-        variant=None,
-        exp_id=0,
-        seed=0,
-        use_gpu=True,
-        # Logger params:
-        exp_prefix="default",
-        snapshot_mode='last',
-        snapshot_gap=1,
-        git_info=None,
-        script_name=None,
-        base_log_dir=None,
-        log_dir=None,
-):
-    """
-    Run an experiment locally without any serialization.
-
-    :param experiment_function: Function. `variant` will be passed in as its
-    only argument.
-    :param exp_prefix: Experiment prefix for the save file.
-    :param variant: Dictionary passed in to `experiment_function`.
-    :param exp_id: Experiment ID. Should be unique across all
-    experiments. Note that one experiment may correspond to multiple seeds,.
-    :param seed: Seed used for this experiment.
-    :param use_gpu: Run with GPU. By default False.
-    :param script_name: Name of the running script
-    :param log_dir: If set, set the log directory to this. Otherwise,
-    the directory will be auto-generated based on the exp_prefix.
-    :return:
-    """
-    if variant is None:
-        variant = {}
-    variant['exp_id'] = str(exp_id)
-
-    if seed is None and 'seed' not in variant:
-        seed = random.randint(0, 100000)
-        variant['seed'] = str(seed)
-    reset_execution_environment()
-
-    actual_log_dir = setup_logger(
-        exp_prefix=exp_prefix,
-        variant=variant,
-        exp_id=exp_id,
-        seed=seed,
-        snapshot_mode=snapshot_mode,
-        snapshot_gap=snapshot_gap,
-        base_log_dir=base_log_dir,
-        log_dir=log_dir,
-        git_info=git_info,
-        script_name=script_name,
-    )
-
-    set_seed(seed)
-    set_gpu_mode(use_gpu)
-
-    run_experiment_here_kwargs = dict(
-        variant=variant,
-        exp_id=exp_id,
-        seed=seed,
-        use_gpu=use_gpu,
-        exp_prefix=exp_prefix,
-        snapshot_mode=snapshot_mode,
-        snapshot_gap=snapshot_gap,
-        git_info=git_info,
-        script_name=script_name,
-        base_log_dir=base_log_dir,
-    )
-    save_experiment_data(
-        dict(
-            run_experiment_here_kwargs=run_experiment_here_kwargs
-        ),
-        actual_log_dir
-    )
-    return experiment_function(variant)
 
 
 def create_exp_name(exp_prefix, exp_id=0, seed=0):

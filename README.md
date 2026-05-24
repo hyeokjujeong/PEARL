@@ -26,7 +26,7 @@ This repository is based on [rlkit](https://github.com/vitchyr/rlkit).
 
 #### Modernized setup (2026)
 
-The original environment (`docker/environment.yml`) is pinned to 2019 builds
+The original environment (`legacy/environment.yml`) is pinned to 2019 builds
 (python 3.5, torch 1.0.1, CUDA 10, `mujoco-py` 1.50) and no longer installs on
 current systems or runs on recent GPUs. A modernized dependency set is provided
 in `requirements.txt`. It uses python 3.11, recent PyTorch, **gymnasium**
@@ -58,7 +58,6 @@ The results for PEARL as well as all baselines on the six continuous control tas
 - [x] add Walker2D and ablation experiment scripts
 - [x] add jupyter notebook to visualize sparse point robot
 - [x] policy simulation script
-- [x] add working Dockerfile for running experiments
 
 --------------------------------------
 
@@ -66,15 +65,10 @@ The results for PEARL as well as all baselines on the six continuous control tas
 
 Clone this repo with `git clone --recurse-submodules`.
 
-To run in Docker, place your MuJoCo key in the `docker` directory, then run `docker build . -t pearl` within that directory to build the Docker image tagged with the name `pearl`.
-As an example, you can then run the container interactively with a bash shell with `docker run --rm --runtime=nvidia -it -v [PATH_TO_OYSTER]:/root/code pearl:latest /bin/bash`.
-The Dockerfile included in this repo includes GPU capability, so you must have a CUDA-10 capable GPU and drivers installed.
-Disclaimer: I am committed to making this Docker work, not to making it the most minimal required. If you have changes to pare it down such that everything still works, please make a pull request and I'm happy to merge it.
-
 To install locally, you will need to first install [MuJoCo](https://www.roboti.us/index.html).
 For the task distributions in which the reward function varies (Cheetah, Ant, Humanoid), install MuJoCo200.
 Set `LD_LIBRARY_PATH` to point to both the MuJoCo binaries (`/$HOME/.mujoco/mujoco200/bin`) as well as the gpu drivers (something like `/usr/lib/nvidia-390`, you can find your version by running `nvidia-smi`).
-For the remaining dependencies, we recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) - create our environment with `conda env create -f docker/environment.yml`
+For the remaining dependencies, we recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) - create our environment with `conda env create -f legacy/environment.yml`
 This installation has been tested only on 64-bit Ubuntu 16.04.
 
 For the task distributions where different tasks correspond to different model parameters (Walker and Hopper), MuJoCo131 is required.

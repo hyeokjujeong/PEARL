@@ -155,7 +155,6 @@ def experiment(variant):
     os.environ['DEBUG'] = str(int(DEBUG))
 
     # create logging directory
-    # TODO support Docker
     exp_id = 'debug' if DEBUG else None
     experiment_log_dir = setup_logger(variant['env_name'], variant=variant, exp_id=exp_id, base_log_dir=variant['util_params']['base_log_dir'])
 
@@ -222,9 +221,8 @@ def _setup_wandb(variant, experiment_log_dir):
 @click.command()
 @click.argument('config', default=None)
 @click.option('--gpu', default=0)
-@click.option('--docker', is_flag=True, default=False)
 @click.option('--debug', is_flag=True, default=False)
-def main(config, gpu, docker, debug):
+def main(config, gpu, debug):
 
     variant = default_config
     if config:

@@ -1,6 +1,6 @@
 # Modernized dependency set for PEARL (2026).
 #
-# Replaces the bit-rotted docker/environment.yml (python 3.5 / torch 1.0.1 /
+# Replaces the bit-rotted legacy/environment.yml (python 3.5 / torch 1.0.1 /
 # mujoco-py 1.50). Tested on Ubuntu, conda env `pearl` with python 3.11 and an
 # RTX 5070 Ti (Blackwell). MuJoCo is now the DeepMind `mujoco` package, so no
 # roboti.us license key is required.

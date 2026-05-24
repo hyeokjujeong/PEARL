@@ -1,6 +1,6 @@
 # Modernization notes (2026)
 
-This repo's original environment (`docker/environment.yml`) is pinned to 2019
+This repo's original environment (`legacy/environment.yml`) is pinned to 2019
 builds — python 3.5.2, torch 1.0.1, CUDA 10, `gym` 0.12, `mujoco-py` 1.50, and a
 now-defunct conda channel. It no longer installs on current systems, and torch
 1.0.1 / CUDA 10 cannot run on recent (Blackwell-class) GPUs at all.

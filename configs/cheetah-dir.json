@@ -17,5 +17,8 @@
         "num_exp_traj_eval": 2,
         "embedding_batch_size": 256,
         "embedding_mini_batch_size": 256
+    },
+    "util_params": {
+        "use_wandb": true
     }
 }

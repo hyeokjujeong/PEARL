@@ -8,5 +8,8 @@
     },
     "algo_params": {
         "max_path_length": 13
+    },
+    "util_params": {
+        "use_wandb": true
     }
 }

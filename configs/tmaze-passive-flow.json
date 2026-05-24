@@ -24,7 +24,7 @@
         "meta_batch": 2
     },
     "flow_params": {
-        "training_mode": "current",
+        "training_mode": "fusedVel+decoderCFM",
         "use_prior_flow": false,
         "cfm_weight": 1.0,
         "cfm_warmup_steps": 0,

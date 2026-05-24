@@ -33,13 +33,17 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.collapse_eps = 1e-4
         self.cfm_weight = 1.0       # weight of the CFM (flow-matching) loss
         self.cfm_warmup_steps = 0   # train steps of recon-only before CFM turns on
-        # paper-mode additions (defaults preserve original 'current' behaviour)
+        # training mode selector (defaults to fused-velocity + decoder grounding)
         # NOTE: name is `flow_training_mode` (not `training_mode`) because the
         # base PEARLSoftActorCritic.training_mode is a *method* that toggles
         # train()/eval() on all networks; shadowing it with a string would
         # break MetaRLAlgorithm.train(). The JSON config key stays
         # `flow_params.training_mode` for ergonomics.
-        self.flow_training_mode = 'current'   # 'current' | 'paper' | 'paper+recon'
+        # Two-axis naming: <velocity-training> + <grounding-type>
+        #   fusedVel+decoderCFM   = fused velocity CFM + decoder reconstruction
+        #   singleVel+vanillaCFM  = per-transition CFM only (no decoder)
+        #   singleVel+decoderCFM  = per-transition CFM + decoder reconstruction
+        self.flow_training_mode = 'fusedVel+decoderCFM'
         self.prior_weight = 1.0          # alpha' in Eq. 7
         # `prior_flow` and `prior_optimizer` are attached by the launcher when
         # a learned prior is enabled; left None otherwise.
@@ -56,9 +60,9 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         return snapshot
 
     def _take_step(self, indices, context):
-        # paper-mode dispatch: keep the original 'current' path untouched
-        if self.flow_training_mode in ('paper', 'paper+recon'):
-            return self._take_step_paper(indices, context)
+        # singleVel mode dispatch: keep the fusedVel path untouched
+        if self.flow_training_mode in ('singleVel+vanillaCFM', 'singleVel+decoderCFM'):
+            return self._take_step_single_vel(indices, context)
         # data is (task, batch, feat)
         obs, actions, rewards, next_obs, terms = self.sample_sac(indices)
 
@@ -191,11 +195,11 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
                     c_variance, self.collapse_eps))
 
     # ---------------------------------------------------------------------
-    # Paper-accurate bootstrapped EM training step (Sec 3.2, Eqs. 5-7).
-    # Selected via flow_training_mode in {'paper', 'paper+recon'}; the original
-    # _take_step is left intact for the 'current' mode.
+    # Per-transition CFM training step (proposal Sec 3.2, Eqs. 5-7).
+    # Selected via flow_training_mode in {'singleVel+vanillaCFM',
+    # 'singleVel+decoderCFM'}; the fusedVel+decoderCFM path is in _take_step.
     # ---------------------------------------------------------------------
-    def _take_step_paper(self, indices, context):
+    def _take_step_single_vel(self, indices, context):
         obs, actions, rewards, next_obs, terms = self.sample_sac(indices)
         t, b, _ = obs.size()
         obs_flat = obs.view(t * b, -1)
@@ -206,11 +210,15 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
 
         encoder = self.agent.context_encoder
 
-        # ---- E-step: stop-grad ODE pass -> pseudo-target c_hat ----------
-        c_hat = encoder.e_step_sample(context).detach()      # (num_tasks, latent)
-        self.agent.z = c_hat                                  # for log/diagnostics
-        # repeat c_hat per transition in the batch; matches PEARLAgent.forward
-        task_z = c_hat.unsqueeze(1).expand(t, b, -1).reshape(t * b, -1)
+        # ---- Encoder forward (single ODE pass, gradient-tracking) -------
+        # c: gradient-tracking (so decoder recon can propagate to encoder per
+        # milestone Eq. 8). c_hat: detached pseudo-target for the CFM
+        # regression (proposal's stop-grad E-step).
+        c = encoder(context)                       # (num_tasks, latent)
+        self.agent.z = c                            # for log/diagnostics
+        c_hat = c.detach()
+        task_z_grad = c.unsqueeze(1).expand(t, b, -1).reshape(t * b, -1)
+        task_z = task_z_grad.detach()               # for policy/SAC/diagnostics
 
         # ---- run policy on (obs, c_hat) ---------------------------------
         in_ = torch.cat([obs_flat, task_z], dim=1)
@@ -218,12 +226,32 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
 
         # ---- M-step: per-transition CFM (Eq. 6) on v_theta --------------
-        sub_context = encoder._subsampled_context             # same trans. as c_hat
+        sub_context = encoder._subsampled_context   # same trans. that produced c
         cfm_loss = encoder.per_transition_cfm_loss(sub_context, c_hat)
         cfm_w = self.cfm_weight if self._n_train_steps_total >= self.cfm_warmup_steps else 0.0
-        encoder_total = cfm_w * cfm_loss
 
+        # ---- decoder reconstruction in 'singleVel+decoderCFM' mode --------
+        # task_z_grad is gradient-tracking, so the recon loss propagates back
+        # through the ODE to the encoder (matches milestone Eq. 8: encoder is
+        # trained jointly by L_flow and L_recon).
+        if self.flow_training_mode == 'singleVel+decoderCFM':
+            pred_next_obs, pred_reward = self.agent.decoder(obs_flat, actions_flat, task_z_grad)
+            recon_obs_loss = F.mse_loss(pred_next_obs, next_obs_flat)
+            recon_r_loss = F.mse_loss(pred_reward, rewards_raw)
+            recon_loss = recon_obs_loss + recon_r_loss
+            elbo_loss = self.recon_weight * recon_loss
+        else:
+            elbo_loss = torch.zeros((), device=ptu.device)
+            recon_loss = torch.zeros((), device=ptu.device)
+            recon_obs_loss = torch.zeros((), device=ptu.device)
+            recon_r_loss = torch.zeros((), device=ptu.device)
+
+        encoder_total = cfm_w * cfm_loss + elbo_loss
+
+        # ---- backward: encoder (+ decoder if singleVel+decoderCFM) ------
         self.context_optimizer.zero_grad()
+        if self.flow_training_mode == 'singleVel+decoderCFM':
+            self.decoder_optimizer.zero_grad()
         if encoder_total.requires_grad:
             encoder_total.backward()
             enc_grad_norm = sum(
@@ -232,6 +260,8 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
                 if p.grad is not None
             )
             self.context_optimizer.step()
+            if self.flow_training_mode == 'singleVel+decoderCFM':
+                self.decoder_optimizer.step()
         else:
             enc_grad_norm = 0.0
 
@@ -243,22 +273,6 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             self.prior_optimizer.step()
         else:
             prior_loss = torch.zeros((), device=ptu.device)
-
-        # ---- (optional) auxiliary decoder loss in 'paper+recon' mode -----
-        # task_z is detached here, so the decoder loss only updates the
-        # decoder itself — the flow encoder/prior are unaffected.
-        if self.flow_training_mode == 'paper+recon':
-            pred_next_obs, pred_reward = self.agent.decoder(obs_flat, actions_flat, task_z)
-            recon_obs_loss = F.mse_loss(pred_next_obs, next_obs_flat)
-            recon_r_loss = F.mse_loss(pred_reward, rewards_raw)
-            recon_loss = recon_obs_loss + recon_r_loss
-            self.decoder_optimizer.zero_grad()
-            (self.recon_weight * recon_loss).backward()
-            self.decoder_optimizer.step()
-        else:
-            recon_loss = torch.zeros((), device=ptu.device)
-            recon_obs_loss = torch.zeros((), device=ptu.device)
-            recon_r_loss = torch.zeros((), device=ptu.device)
 
         # ---- SAC losses (task_z already detached) -----------------------
         q1_pred = self.qf1(obs_flat, actions_flat, task_z)

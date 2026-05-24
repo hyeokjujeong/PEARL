@@ -59,8 +59,11 @@ default_config = dict(
         collapse_eps=1e-4,  # c_variance below this => latent collapse, abort
         cfm_weight=1.0,     # weight of the CFM (flow-matching) loss
         cfm_warmup_steps=0, # train steps of recon-only before CFM turns on
-        # ---- paper-method additions (Eq. 5-7); defaults preserve current run --
-        training_mode='current',  # 'current' | 'paper' | 'paper+recon'
+        # ---- two-axis training mode: <velocity> + <grounding> --------------
+        # fusedVel+decoderCFM   = fused velocity CFM + decoder reconstruction
+        # singleVel+vanillaCFM  = per-transition CFM only (no decoder)
+        # singleVel+decoderCFM  = per-transition CFM + decoder reconstruction
+        training_mode='fusedVel+decoderCFM',
         use_prior_flow=False,     # learn unconditional v_phi for the marginal p(c)
         prior_hidden=128,         # hidden width of the prior flow v_phi
         prior_weight=1.0,         # alpha' in Eq. 7 (weight on L_prior)

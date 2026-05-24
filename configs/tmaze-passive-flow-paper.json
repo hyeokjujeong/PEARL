@@ -24,7 +24,7 @@
         "meta_batch": 2
     },
     "flow_params": {
-        "training_mode": "paper",
+        "training_mode": "singleVel+vanillaCFM",
         "use_prior_flow": true,
         "prior_hidden": 128,
         "prior_weight": 1.0,

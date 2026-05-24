@@ -125,7 +125,7 @@ def experiment(variant):
         # paper-mode additions
         # base PEARLSoftActorCritic.training_mode is a method; use a distinct
         # attribute name to avoid shadowing it. JSON config key is unchanged.
-        algorithm.flow_training_mode = variant['flow_params'].get('training_mode', 'current')
+        algorithm.flow_training_mode = variant['flow_params'].get('training_mode', 'fusedVel+decoderCFM')
         algorithm.prior_weight = variant['flow_params'].get('prior_weight', 1.0)
         algorithm.prior_flow = prior_flow
         if prior_flow is not None:

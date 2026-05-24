@@ -50,6 +50,7 @@ default_config = dict(
         debug=False, # debugging triggers printing and writes logs to debug directory
         use_wandb=False, # log per-iteration metrics to Weights & Biases
         wandb_project='pearl', # W&B project name (used when use_wandb=True)
+        wandb_run_name=None, # W&B run name; if None falls back to log dir basename
     ),
     flow_params=dict(
         encoder_hidden=128, # hidden width of the flow context encoder

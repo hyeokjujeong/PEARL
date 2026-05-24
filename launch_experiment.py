@@ -201,9 +201,14 @@ def _setup_wandb(variant, experiment_log_dir):
     ''' init W&B and forward every dump_tabular() row to it '''
     import wandb
     from rlkit.core import logger
+    # custom run name from config (util_params.wandb_run_name);
+    # falls back to the log dir basename if not set.
+    run_name = variant['util_params'].get('wandb_run_name')
+    if not run_name:
+        run_name = os.path.basename(experiment_log_dir.rstrip('/'))
     wandb.init(
         project=variant['util_params'].get('wandb_project', 'pearl'),
-        name=os.path.basename(experiment_log_dir.rstrip('/')),
+        name=run_name,
         config=variant,
         dir=experiment_log_dir,
     )
@@ -222,7 +227,13 @@ def _setup_wandb(variant, experiment_log_dir):
 @click.argument('config', default=None)
 @click.option('--gpu', default=0)
 @click.option('--debug', is_flag=True, default=False)
-def main(config, gpu, debug):
+@click.option('--num-iterations', type=int, default=None,
+              help='Override algo_params.num_iterations (for smoke tests).')
+@click.option('--no-wandb', is_flag=True, default=False,
+              help='Disable wandb logging for this run (overrides config).')
+@click.option('--wandb-run-name', type=str, default=None,
+              help='Override util_params.wandb_run_name for this run.')
+def main(config, gpu, debug, num_iterations, no_wandb, wandb_run_name):
 
     variant = default_config
     if config:
@@ -230,6 +241,12 @@ def main(config, gpu, debug):
             exp_params = json.load(f)
         variant = deep_update_dict(exp_params, variant)
     variant['util_params']['gpu_id'] = gpu
+    if num_iterations is not None:
+        variant['algo_params']['num_iterations'] = num_iterations
+    if no_wandb:
+        variant['util_params']['use_wandb'] = False
+    if wandb_run_name is not None:
+        variant['util_params']['wandb_run_name'] = wandb_run_name
 
     experiment(variant)
 

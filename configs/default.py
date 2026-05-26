@@ -68,6 +68,8 @@ default_config = dict(
         use_prior_flow=False,     # learn unconditional v_phi for the marginal p(c)
         prior_hidden=128,         # hidden width of the prior flow v_phi
         prior_weight=1.0,         # alpha' in Eq. 7 (weight on L_prior)
+        sac_detach_task_z=True,   # Option B (default): detach task_z for SAC losses.
+                                  # False = Option A (PEARL-style): critic grad to encoder.
         # ---- numerical guards / ablation knobs (paper Plan §4 stage 4) -------
         max_context=16,           # subsample context for fused ODE; None = use ALL transitions (paper-faithful)
         vel_clip=10.0,            # tanh-squash on fused velocity norm (MVP guard); set high to effectively disable

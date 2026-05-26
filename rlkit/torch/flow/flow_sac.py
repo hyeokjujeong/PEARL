@@ -45,6 +45,13 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         #   singleVel+decoderCFM  = per-transition CFM + decoder reconstruction
         self.flow_training_mode = 'fusedVel+decoderCFM'
         self.prior_weight = 1.0          # alpha' in Eq. 7
+        # SAC <-> encoder gradient coupling. True (default) = pure Option B:
+        # task_z is detached for SAC losses so the critic does NOT push
+        # gradient into the flow encoder. False = Option A (PEARL-style):
+        # task_z stays gradient-tracking in qf/vf/policy, so critic Bellman
+        # error also trains the encoder. Used to ablate whether the policy
+        # being unable to "ask" the encoder for task info is the bottleneck.
+        self.sac_detach_task_z = True
         # `prior_flow` and `prior_optimizer` are attached by the launcher when
         # a learned prior is enabled; left None otherwise.
         if not hasattr(self, 'prior_flow'):
@@ -62,6 +69,9 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
     def _take_step(self, indices, context):
         # singleVel mode dispatch: keep the fusedVel path untouched
         if self.flow_training_mode in ('singleVel+vanillaCFM', 'singleVel+decoderCFM'):
+            if not self.sac_detach_task_z:
+                # Option A: critic gradient flows back to encoder (PEARL-style)
+                return self._take_step_single_vel_option_a(indices, context)
             return self._take_step_single_vel(indices, context)
         # data is (task, batch, feat)
         obs, actions, rewards, next_obs, terms = self.sample_sac(indices)
@@ -125,7 +135,8 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             prior_loss = torch.zeros((), device=ptu.device)
 
         # ---- SAC losses ------------------------------------------------------
-        # task_z detached: the encoder receives no gradient from the critic.
+        # task_z detached: the encoder receives no gradient from the critic (Option B).
+        # For Option A (critic grad to encoder) see _take_step_single_vel_option_a.
         task_z = task_z.detach()
 
         q1_pred = self.qf1(obs, actions, task_z)
@@ -218,7 +229,7 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.agent.z = c                            # for log/diagnostics
         c_hat = c.detach()
         task_z_grad = c.unsqueeze(1).expand(t, b, -1).reshape(t * b, -1)
-        task_z = task_z_grad.detach()               # for policy/SAC/diagnostics
+        task_z = task_z_grad.detach()               # Option B: SAC sees detached c
 
         # ---- run policy on (obs, c_hat) ---------------------------------
         in_ = torch.cat([obs_flat, task_z], dim=1)
@@ -310,6 +321,151 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.policy_optimizer.zero_grad()
         policy_loss.backward()
         self.policy_optimizer.step()
+
+        if self.eval_statistics is None:
+            self.eval_statistics = OrderedDict()
+            z = ptu.get_numpy(self.agent.z)
+            c_variance = float(np.mean(np.var(z, axis=0)))
+            self.eval_statistics['recon_loss'] = float(ptu.get_numpy(recon_loss))
+            self.eval_statistics['recon_loss_r'] = float(ptu.get_numpy(recon_r_loss))
+            self.eval_statistics['recon_loss_obs'] = float(ptu.get_numpy(recon_obs_loss))
+            self.eval_statistics['cfm_loss'] = float(ptu.get_numpy(cfm_loss))
+            self.eval_statistics['prior_cfm_loss'] = float(ptu.get_numpy(prior_loss))
+            self.eval_statistics['c_norm'] = float(np.mean(np.linalg.norm(z, axis=-1)))
+            self.eval_statistics['c_variance'] = c_variance
+            self.eval_statistics['flow_encoder_grad_norm'] = enc_grad_norm
+            self.eval_statistics['QF Loss'] = np.mean(ptu.get_numpy(qf_loss))
+            self.eval_statistics['VF Loss'] = np.mean(ptu.get_numpy(vf_loss))
+            self.eval_statistics['Policy Loss'] = np.mean(ptu.get_numpy(policy_loss))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'Q Predictions', ptu.get_numpy(q1_pred)))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'V Predictions', ptu.get_numpy(v_pred)))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'Log Pis', ptu.get_numpy(log_pi)))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'Policy mu', ptu.get_numpy(policy_mean)))
+            self.eval_statistics.update(create_stats_ordered_dict(
+                'Policy log std', ptu.get_numpy(policy_log_std)))
+            if c_variance < self.collapse_eps:
+                print('ERROR: latent collapsed (c_variance={:.3e} < {:.1e})'.format(
+                    c_variance, self.collapse_eps))
+
+    # ---------------------------------------------------------------------
+    # Option A variant: critic Bellman error flows back through task_z into
+    # the encoder. Diverges from PEARL Option B (default in _take_step_*).
+    # Used to test whether the policy-encoder coupling is the bottleneck on
+    # tmaze-passive (where Option B 4-seed avg was ~0.5, same as PEARL).
+    #
+    # Key differences vs _take_step_single_vel:
+    #   - task_z is NOT detached for SAC (kept as task_z_grad)
+    #   - encoder_total.backward(retain_graph=True) — graph must survive SAC
+    #   - SAC backwards also use retain_graph (except the last, policy)
+    #   - context/decoder optimizer step is deferred until AFTER all SAC
+    #     backwards, so they accumulate gradient from recon+CFM+critic
+    # ---------------------------------------------------------------------
+    def _take_step_single_vel_option_a(self, indices, context):
+        obs, actions, rewards, next_obs, terms = self.sample_sac(indices)
+        t, b, _ = obs.size()
+        obs_flat = obs.view(t * b, -1)
+        actions_flat = actions.view(t * b, -1)
+        next_obs_flat = next_obs.view(t * b, -1)
+        rewards_raw = rewards.view(t * b, -1)
+        terms_flat = terms.view(t * b, -1)
+
+        encoder = self.agent.context_encoder
+
+        # Encoder forward — gradient-tracking c used everywhere, no detach for SAC
+        c = encoder(context)
+        self.agent.z = c
+        c_hat = c.detach()                                # CFM bootstrap target
+        task_z_grad = c.unsqueeze(1).expand(t, b, -1).reshape(t * b, -1)
+        task_z = task_z_grad                              # Option A: NO detach for SAC
+
+        in_ = torch.cat([obs_flat, task_z], dim=1)
+        policy_outputs = self.agent.policy(in_, reparameterize=True, return_log_prob=True)
+        new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
+
+        # Encoder-side losses (recon + CFM)
+        sub_context = encoder._subsampled_context
+        cfm_loss = encoder.per_transition_cfm_loss(sub_context, c_hat)
+        cfm_w = self.cfm_weight if self._n_train_steps_total >= self.cfm_warmup_steps else 0.0
+        if self.flow_training_mode == 'singleVel+decoderCFM':
+            pred_next_obs, pred_reward = self.agent.decoder(obs_flat, actions_flat, task_z_grad)
+            recon_obs_loss = F.mse_loss(pred_next_obs, next_obs_flat)
+            recon_r_loss = F.mse_loss(pred_reward, rewards_raw)
+            recon_loss = recon_obs_loss + recon_r_loss
+            elbo_loss = self.recon_weight * recon_loss
+        else:
+            elbo_loss = torch.zeros((), device=ptu.device)
+            recon_loss = torch.zeros((), device=ptu.device)
+            recon_obs_loss = torch.zeros((), device=ptu.device)
+            recon_r_loss = torch.zeros((), device=ptu.device)
+
+        encoder_total = cfm_w * cfm_loss + elbo_loss
+
+        # Encoder backward — KEEP graph; encoder/decoder step deferred to end
+        self.context_optimizer.zero_grad()
+        if self.flow_training_mode == 'singleVel+decoderCFM':
+            self.decoder_optimizer.zero_grad()
+        if encoder_total.requires_grad:
+            encoder_total.backward(retain_graph=True)
+
+        # Prior CFM (separate graph through prior_flow only)
+        if self.prior_flow is not None and self.prior_optimizer is not None:
+            prior_loss = self.prior_flow.cfm_loss(c_hat)
+            self.prior_optimizer.zero_grad()
+            (self.prior_weight * prior_loss).backward()
+            self.prior_optimizer.step()
+        else:
+            prior_loss = torch.zeros((), device=ptu.device)
+
+        # SAC losses — gradients accumulate into encoder via task_z_grad
+        q1_pred = self.qf1(obs_flat, actions_flat, task_z)
+        q2_pred = self.qf2(obs_flat, actions_flat, task_z)
+        v_pred = self.vf(obs_flat, task_z)
+        with torch.no_grad():
+            target_v_values = self.target_vf(next_obs_flat, task_z)
+
+        self.qf1_optimizer.zero_grad()
+        self.qf2_optimizer.zero_grad()
+        rewards_flat = rewards_raw * self.reward_scale
+        q_target = rewards_flat + (1. - terms_flat) * self.discount * target_v_values
+        qf_loss = torch.mean((q1_pred - q_target) ** 2) + torch.mean((q2_pred - q_target) ** 2)
+        qf_loss.backward(retain_graph=True)
+        self.qf1_optimizer.step()
+        self.qf2_optimizer.step()
+
+        min_q_new_actions = self._min_q(obs_flat, new_actions, task_z)
+
+        v_target = min_q_new_actions - log_pi
+        vf_loss = self.vf_criterion(v_pred, v_target.detach())
+        self.vf_optimizer.zero_grad()
+        vf_loss.backward(retain_graph=True)
+        self.vf_optimizer.step()
+        self._update_target_network()
+
+        policy_loss = (log_pi - min_q_new_actions).mean()
+        mean_reg_loss = self.policy_mean_reg_weight * (policy_mean ** 2).mean()
+        std_reg_loss = self.policy_std_reg_weight * (policy_log_std ** 2).mean()
+        pre_tanh_value = policy_outputs[-1]
+        pre_activation_reg_loss = self.policy_pre_activation_weight * (
+            (pre_tanh_value ** 2).sum(dim=1).mean()
+        )
+        policy_loss = policy_loss + mean_reg_loss + std_reg_loss + pre_activation_reg_loss
+        self.policy_optimizer.zero_grad()
+        policy_loss.backward()                          # last backward, free graph
+        self.policy_optimizer.step()
+
+        # NOW step encoder + decoder with grads from recon+CFM+SAC accumulated
+        enc_grad_norm = sum(
+            p.grad.norm().item()
+            for p in encoder.parameters()
+            if p.grad is not None
+        )
+        self.context_optimizer.step()
+        if self.flow_training_mode == 'singleVel+decoderCFM':
+            self.decoder_optimizer.step()
 
         if self.eval_statistics is None:
             self.eval_statistics = OrderedDict()

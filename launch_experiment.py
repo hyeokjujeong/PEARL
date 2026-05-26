@@ -229,11 +229,13 @@ def _setup_wandb(variant, experiment_log_dir):
 @click.option('--debug', is_flag=True, default=False)
 @click.option('--num-iterations', type=int, default=None,
               help='Override algo_params.num_iterations (for smoke tests).')
+@click.option('--num-evals', type=int, default=None,
+              help='Override algo_params.num_evals (smoothing eval curves).')
 @click.option('--no-wandb', is_flag=True, default=False,
               help='Disable wandb logging for this run (overrides config).')
 @click.option('--wandb-run-name', type=str, default=None,
               help='Override util_params.wandb_run_name for this run.')
-def main(config, gpu, debug, num_iterations, no_wandb, wandb_run_name):
+def main(config, gpu, debug, num_iterations, num_evals, no_wandb, wandb_run_name):
 
     variant = default_config
     if config:
@@ -243,6 +245,8 @@ def main(config, gpu, debug, num_iterations, no_wandb, wandb_run_name):
     variant['util_params']['gpu_id'] = gpu
     if num_iterations is not None:
         variant['algo_params']['num_iterations'] = num_iterations
+    if num_evals is not None:
+        variant['algo_params']['num_evals'] = num_evals
     if no_wandb:
         variant['util_params']['use_wandb'] = False
     if wandb_run_name is not None:

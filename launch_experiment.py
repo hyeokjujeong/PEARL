@@ -236,7 +236,9 @@ def _setup_wandb(variant, experiment_log_dir):
               help='Disable wandb logging for this run (overrides config).')
 @click.option('--wandb-run-name', type=str, default=None,
               help='Override util_params.wandb_run_name for this run.')
-def main(config, gpu, debug, num_iterations, num_evals, no_wandb, wandb_run_name):
+@click.option('--wandb-project', type=str, default=None,
+              help='Override util_params.wandb_project (auto-creates on first run).')
+def main(config, gpu, debug, num_iterations, num_evals, no_wandb, wandb_run_name, wandb_project):
 
     variant = default_config
     if config:
@@ -252,6 +254,8 @@ def main(config, gpu, debug, num_iterations, num_evals, no_wandb, wandb_run_name
         variant['util_params']['use_wandb'] = False
     if wandb_run_name is not None:
         variant['util_params']['wandb_run_name'] = wandb_run_name
+    if wandb_project is not None:
+        variant['util_params']['wandb_project'] = wandb_project
 
     experiment(variant)
 

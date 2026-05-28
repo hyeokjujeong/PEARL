@@ -375,14 +375,20 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
 
         encoder = self.agent.context_encoder
 
-        # Encoder forward — gradient-tracking c used everywhere, no detach for SAC
+        # Encoder forward. task_z_grad (gradient-tracking) flows to the encoder
+        # ONLY through the decoder reconstruction and the Q-critic — mirroring
+        # PEARL's Option A, where the encoder is grounded by the Bellman error
+        # of Q but NOT by V or the policy (those are detached). The earlier
+        # implementation left task_z attached everywhere (Q+V+policy), which
+        # over-couples the encoder; PEARL deliberately restricts to Q because
+        # the Q Bellman error is the cleanest task-discriminative signal.
         c = encoder(context)
         self.agent.z = c
         c_hat = c.detach()                                # CFM bootstrap target
         task_z_grad = c.unsqueeze(1).expand(t, b, -1).reshape(t * b, -1)
-        task_z = task_z_grad                              # Option A: NO detach for SAC
+        task_z_detached = task_z_grad.detach()            # for V and policy (PEARL-faithful)
 
-        in_ = torch.cat([obs_flat, task_z], dim=1)
+        in_ = torch.cat([obs_flat, task_z_detached], dim=1)
         policy_outputs = self.agent.policy(in_, reparameterize=True, return_log_prob=True)
         new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
 
@@ -420,12 +426,14 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         else:
             prior_loss = torch.zeros((), device=ptu.device)
 
-        # SAC losses — gradients accumulate into encoder via task_z_grad
-        q1_pred = self.qf1(obs_flat, actions_flat, task_z)
-        q2_pred = self.qf2(obs_flat, actions_flat, task_z)
-        v_pred = self.vf(obs_flat, task_z)
+        # SAC losses. Only Q uses gradient-tracking task_z_grad → encoder gets
+        # the Bellman-error signal (PEARL Option A). V and policy use the
+        # detached copy, so they do NOT push gradient into the encoder.
+        q1_pred = self.qf1(obs_flat, actions_flat, task_z_grad)
+        q2_pred = self.qf2(obs_flat, actions_flat, task_z_grad)
+        v_pred = self.vf(obs_flat, task_z_detached)
         with torch.no_grad():
-            target_v_values = self.target_vf(next_obs_flat, task_z)
+            target_v_values = self.target_vf(next_obs_flat, task_z_detached)
 
         self.qf1_optimizer.zero_grad()
         self.qf2_optimizer.zero_grad()
@@ -436,7 +444,7 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.qf1_optimizer.step()
         self.qf2_optimizer.step()
 
-        min_q_new_actions = self._min_q(obs_flat, new_actions, task_z)
+        min_q_new_actions = self._min_q(obs_flat, new_actions, task_z_detached)
 
         v_target = min_q_new_actions - log_pi
         vf_loss = self.vf_criterion(v_pred, v_target.detach())

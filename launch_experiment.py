@@ -209,14 +209,21 @@ def _setup_wandb(variant, experiment_log_dir):
         config=variant,
         dir=experiment_log_dir,
     )
+    # Make env steps the default x-axis for all charts. The Epoch / rollout /
+    # train-step counters are still logged, so the W&B UI lets you switch to
+    # any of them via the chart settings.
+    wandb.define_metric('Number of env steps total')
+    wandb.define_metric('Number of rollouts total')
+    wandb.define_metric('Number of train steps total')
+    wandb.define_metric('Epoch')
+    wandb.define_metric('*', step_metric='Number of env steps total')
 
     def _log(tabular_dict):
         metrics = _to_numeric(tabular_dict)
-        epoch = metrics.pop('Epoch', None)
-        if epoch is not None:
-            wandb.log(metrics, step=int(epoch))
-        else:
-            wandb.log(metrics)
+        # Drop the explicit `step=` to let define_metric() above choose the
+        # x-axis. `Epoch` stays in `metrics` so it's still plottable as a
+        # selectable alternate axis.
+        wandb.log(metrics)
 
     logger.add_tabular_callback(_log)
 

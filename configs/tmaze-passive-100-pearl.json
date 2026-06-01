@@ -1,6 +1,6 @@
 {
     "env_name": "tmaze-passive",
-    "method": "flow",
+    "method": "baseline",
     "n_train_tasks": 2,
     "n_eval_tasks": 2,
     "env_params": {
@@ -15,21 +15,13 @@
         "num_extra_rl_steps_posterior": 200,
         "num_train_steps_per_itr": 1000,
         "num_evals": 32,
-        "num_steps_per_eval": 44,
+        "num_steps_per_eval": 404,
         "reward_scale": 100.0,
-        "use_information_bottleneck": false,
+        "use_information_bottleneck": true,
         "batch_size": 64,
         "embedding_batch_size": 64,
         "embedding_mini_batch_size": 64,
         "meta_batch": 2
-    },
-    "flow_params": {
-        "training_mode": "current",
-        "use_prior_flow": false,
-        "cfm_weight": 1.0,
-        "cfm_warmup_steps": 0,
-        "recon_weight": 1.0,
-        "max_context": null
     },
     "util_params": {
         "use_wandb": true

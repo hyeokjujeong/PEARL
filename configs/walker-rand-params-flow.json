@@ -1,10 +1,10 @@
 {
     "env_name": "walker-rand-params",
     "method": "flow",
-    "n_train_tasks": 40,
-    "n_eval_tasks": 10,
+    "n_train_tasks": 100,
+    "n_eval_tasks": 20,
     "env_params": {
-        "n_tasks": 50
+        "n_tasks": 120
     },
     "algo_params": {
         "use_next_obs_in_context": true,
@@ -27,8 +27,8 @@
         "prior_hidden": 128,
         "prior_weight": 1.0,
         "cfm_weight": 1.0,
-        "recon_weight": 1.0,
-        "use_dynamics_decoder": true,
+        "recon_weight": 0.0,
+        "use_dynamics_decoder": false,
         "max_context": null
     }
 }

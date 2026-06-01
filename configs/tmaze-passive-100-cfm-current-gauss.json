@@ -15,7 +15,7 @@
         "num_extra_rl_steps_posterior": 200,
         "num_train_steps_per_itr": 1000,
         "num_evals": 32,
-        "num_steps_per_eval": 44,
+        "num_steps_per_eval": 404,
         "reward_scale": 100.0,
         "use_information_bottleneck": false,
         "batch_size": 64,

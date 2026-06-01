@@ -33,6 +33,10 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.collapse_eps = 1e-4
         self.cfm_weight = 1.0       # weight of the CFM (flow-matching) loss
         self.cfm_warmup_steps = 0   # train steps of recon-only before CFM turns on
+        # gate the next-state (dynamics) decoder head. True preserves the
+        # original behaviour (reconstruct next_obs + reward); set False to
+        # ground only through the reward head (overridden by the launcher).
+        self.use_dynamics_decoder = True
         # paper-mode additions (defaults preserve original 'current' behaviour)
         # NOTE: name is `flow_training_mode` (not `training_mode`) because the
         # base PEARLSoftActorCritic.training_mode is a *method* that toggles
@@ -83,7 +87,14 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         pred_next_obs, pred_reward = self.agent.decoder(obs, actions, task_z)
         recon_obs_loss = F.mse_loss(pred_next_obs, next_obs)
         recon_r_loss = F.mse_loss(pred_reward, rewards_raw)
-        recon_loss = recon_obs_loss + recon_r_loss
+        # `use_dynamics_decoder` gates the next-state (dynamics) head. When off,
+        # only the reward head grounds c (reward-varying tasks like point-robot
+        # carry no signal in the dynamics head anyway). recon_obs_loss is still
+        # computed for logging. (next_obs head stays in the net; its loss is
+        # just excluded from the encoder/decoder gradient.)
+        recon_loss = recon_r_loss
+        if self.use_dynamics_decoder:
+            recon_loss = recon_loss + recon_obs_loss
         elbo_loss = self.recon_weight * recon_loss
 
         # ---- CFM (bootstrap-EM) -- trains v_theta as a real velocity field ---
@@ -251,7 +262,9 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             pred_next_obs, pred_reward = self.agent.decoder(obs_flat, actions_flat, task_z)
             recon_obs_loss = F.mse_loss(pred_next_obs, next_obs_flat)
             recon_r_loss = F.mse_loss(pred_reward, rewards_raw)
-            recon_loss = recon_obs_loss + recon_r_loss
+            recon_loss = recon_r_loss
+            if self.use_dynamics_decoder:
+                recon_loss = recon_loss + recon_obs_loss
             self.decoder_optimizer.zero_grad()
             (self.recon_weight * recon_loss).backward()
             self.decoder_optimizer.step()

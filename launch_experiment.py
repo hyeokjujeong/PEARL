@@ -122,6 +122,7 @@ def experiment(variant):
         algorithm.collapse_eps = variant['flow_params']['collapse_eps']
         algorithm.cfm_weight = variant['flow_params']['cfm_weight']
         algorithm.cfm_warmup_steps = variant['flow_params']['cfm_warmup_steps']
+        algorithm.use_dynamics_decoder = variant['flow_params'].get('use_dynamics_decoder', True)
         # paper-mode additions
         # base PEARLSoftActorCritic.training_mode is a method; use a distinct
         # attribute name to avoid shadowing it. JSON config key is unchanged.

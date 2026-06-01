@@ -57,6 +57,7 @@ default_config = dict(
         decoder_hidden=128, # hidden width of the transition decoder
         n_ode_steps=5,      # ODE integration steps for sampling c (Stage 2+)
         recon_weight=1.0,   # weight of the decoder reconstruction (ELBO) loss
+        use_dynamics_decoder=True, # include next-state decoder head; False => reward-head grounding only
         collapse_eps=1e-4,  # c_variance below this => latent collapse, abort
         cfm_weight=1.0,     # weight of the CFM (flow-matching) loss
         cfm_warmup_steps=0, # train steps of recon-only before CFM turns on

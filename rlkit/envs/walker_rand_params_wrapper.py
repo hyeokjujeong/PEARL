@@ -1,5 +1,5 @@
 import numpy as np
-from rand_param_envs.walker2d_rand_params import Walker2DRandParamsEnv
+from .walker2d_rand_params import Walker2DRandParamsEnv
 
 from . import register_env
 

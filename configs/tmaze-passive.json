@@ -7,6 +7,21 @@
         "corridor_length": 10
     },
     "algo_params": {
-        "max_path_length": 11
+        "max_path_length": 11,
+        "num_initial_steps": 200,
+        "num_steps_prior": 200,
+        "num_steps_posterior": 0,
+        "num_extra_rl_steps_posterior": 200,
+        "num_train_steps_per_itr": 1000,
+        "num_evals": 32,
+        "num_steps_per_eval": 44,
+        "reward_scale": 100.0,
+        "batch_size": 64,
+        "embedding_batch_size": 64,
+        "embedding_mini_batch_size": 64,
+        "meta_batch": 2
+    },
+    "util_params": {
+        "use_wandb": true
     }
 }

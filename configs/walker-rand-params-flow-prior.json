@@ -1,0 +1,37 @@
+{
+    "env_name": "walker-rand-params",
+    "method": "flow",
+    "n_train_tasks": 40,
+    "n_eval_tasks": 10,
+    "env_params": {
+        "n_tasks": 50
+    },
+    "algo_params": {
+        "use_next_obs_in_context": true,
+        "meta_batch": 10,
+        "num_initial_steps": 2000,
+        "num_steps_prior": 400,
+        "num_steps_posterior": 0,
+        "num_extra_rl_steps_posterior": 600,
+        "num_train_steps_per_itr": 4000,
+        "num_evals": 2,
+        "num_steps_per_eval": 600,
+        "num_exp_traj_eval": 2,
+        "use_information_bottleneck": false,
+        "embedding_batch_size": 100,
+        "embedding_mini_batch_size": 100
+    },
+    "flow_params": {
+        "training_mode": "fusedVel+decoderCFM",
+        "use_prior_flow": true,
+        "prior_hidden": 128,
+        "prior_weight": 1.0,
+        "cfm_weight": 1.0,
+        "cfm_warmup_steps": 0,
+        "recon_weight": 1.0,
+        "max_context": null
+    },
+    "util_params": {
+        "use_wandb": true
+    }
+}

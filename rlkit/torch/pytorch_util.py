@@ -78,9 +78,13 @@ def set_gpu_mode(mode, gpu_id=0):
     global _gpu_id
     _gpu_id = gpu_id
     _use_gpu = mode
-    device = torch.device("cuda:0" if _use_gpu else "cpu")
-    if _use_gpu:
-        os.environ['CUDA_VISIBLE_DEVICES'] = str(_gpu_id)
+    # Do NOT overwrite CUDA_VISIBLE_DEVICES -- that silently discards the user's
+    # shell setting (CUDA_VISIBLE_DEVICES=1 → forced back to 0). Instead, use
+    # gpu_id as the logical cuda index within whatever is already visible.
+    # Typical usage:
+    #   shell CUDA_VISIBLE_DEVICES=1 + --gpu 0  → device = cuda:0 = physical GPU 1
+    #   shell unset                  + --gpu 1  → device = cuda:1 = physical GPU 1
+    device = torch.device(f"cuda:{_gpu_id}" if _use_gpu else "cpu")
 
 
 def gpu_enabled():

@@ -134,6 +134,10 @@ def experiment(variant):
                 prior_flow.parameters(),
                 lr=variant['algo_params']['context_lr'],
             )
+        # Bypass flag (hypothesis test, NOT paper-faithful):
+        # when True, paper-mode also feeds encoder grad through the Q loss.
+        algorithm.q_grad_to_encoder = variant['flow_params'].get('q_grad_to_encoder', False)
+        algorithm.encoder_grad_clip = variant['flow_params'].get('encoder_grad_clip', 10.0)
 
     # optionally load pre-trained weights
     if variant['path_to_weights'] is not None:
@@ -227,12 +231,44 @@ def _setup_wandb(variant, experiment_log_dir):
 
     logger.add_tabular_callback(_log)
 
+def _apply_override(variant, dotted_key, raw_value):
+    """Apply a dot-path override like 'algo_params.reward_scale=10' onto variant.
+
+    Value parsing uses JSON, so '10' -> int 10, '3.14' -> float, 'true' -> bool,
+    'null' -> None, '[1,2,3]' -> list. Anything that fails json.loads is kept as
+    the literal string (so 'paper' stays "paper").
+    """
+    try:
+        value = json.loads(raw_value)
+    except (json.JSONDecodeError, TypeError):
+        value = raw_value
+    keys = dotted_key.split('.')
+    d = variant
+    for k in keys[:-1]:
+        if k not in d or not isinstance(d[k], dict):
+            raise click.UsageError(
+                f"--set {dotted_key}={raw_value}: path '{'.'.join(keys[:-1])}' "
+                f"does not exist in the config (key '{k}' missing or not a dict)."
+            )
+        d = d[k]
+    leaf = keys[-1]
+    if leaf not in d:
+        # Allow adding new keys (e.g. for paper-mode params), but warn.
+        click.echo(f"[override] adding new key {dotted_key} = {value!r}", err=True)
+    d[leaf] = value
+
+
 @click.command()
 @click.argument('config', default=None)
 @click.option('--gpu', default=0)
 @click.option('--docker', is_flag=True, default=False)
 @click.option('--debug', is_flag=True, default=False)
-def main(config, gpu, docker, debug):
+@click.option('--set', '-s', 'overrides', multiple=True,
+              help="Override a config value via dot-path, e.g. "
+                   "-s algo_params.reward_scale=10 -s latent_size=2. "
+                   "Value is parsed as JSON, falling back to string. "
+                   "Repeatable.")
+def main(config, gpu, docker, debug, overrides):
 
     variant = default_config
     if config:
@@ -240,6 +276,13 @@ def main(config, gpu, docker, debug):
             exp_params = json.load(f)
         variant = deep_update_dict(exp_params, variant)
     variant['util_params']['gpu_id'] = gpu
+
+    # Apply CLI overrides last so they win over both default and JSON.
+    for spec in overrides:
+        if '=' not in spec:
+            raise click.UsageError(f"--set expects 'key=value', got: {spec!r}")
+        dotted_key, raw_value = spec.split('=', 1)
+        _apply_override(variant, dotted_key, raw_value)
 
     experiment(variant)
 

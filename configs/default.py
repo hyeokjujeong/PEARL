@@ -66,6 +66,14 @@ default_config = dict(
         use_prior_flow=False,     # learn unconditional v_phi for the marginal p(c)
         prior_hidden=128,         # hidden width of the prior flow v_phi
         prior_weight=1.0,         # alpha' in Eq. 7 (weight on L_prior)
+        # bypass for paper mode: feed Q-loss gradient into encoder too.
+        # NOT paper-faithful; intended as a hypothesis test for whether pure
+        # bootstrapped EM lacks task-grounding signal.
+        q_grad_to_encoder=False,
+        # Encoder gradient clipping. Default 10 keeps off-bypass behaviour
+        # unchanged (CFM-only grad < 10 empirically) but prevents the
+        # Q->encoder explosion under bypass (observed spikes to ~8000).
+        encoder_grad_clip=10.0,
         # ---- numerical guards / ablation knobs (paper Plan §4 stage 4) -------
         max_context=16,           # subsample context for fused ODE; None = use ALL transitions (paper-faithful)
         vel_clip=10.0,            # tanh-squash on fused velocity norm (MVP guard); set high to effectively disable

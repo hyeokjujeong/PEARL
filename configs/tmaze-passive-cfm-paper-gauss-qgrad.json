@@ -26,7 +26,7 @@
     },
     "flow_params": {
         "training_mode": "paper",
-        "use_prior_flow": true,
+        "use_prior_flow": false,
         "prior_hidden": 128,
         "prior_weight": 1.0,
         "cfm_weight": 1.0,

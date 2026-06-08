@@ -1,0 +1,37 @@
+{
+    "env_name": "cheetah-dir",
+    "method": "flow",
+    "n_train_tasks": 2,
+    "n_eval_tasks": 2,
+    "env_params": {
+        "n_tasks": 2
+    },
+    "algo_params": {
+        "meta_batch": 4,
+        "num_initial_steps": 2000,
+        "num_steps_prior": 1000,
+        "num_steps_posterior": 0,
+        "num_extra_rl_steps_posterior": 1000,
+        "num_evals": 4,
+        "num_steps_per_eval": 600,
+        "num_exp_traj_eval": 2,
+        "use_information_bottleneck": false,
+        "embedding_batch_size": 256,
+        "embedding_mini_batch_size": 256
+    },
+    "flow_params": {
+        "training_mode": "singleVel+vanillaCFM",
+        "use_prior_flow": false,
+        "cfm_weight": 1.0,
+        "cfm_warmup_steps": 0,
+        "recon_weight": 0.0,
+        "max_context": null,
+        "sac_detach_task_z": false,
+        "changing_c_freq": 1
+    },
+    "util_params": {
+        "use_wandb": true,
+        "wandb_project": "pearl_dyn_c",
+        "wandb_run_name": "cheetah_vanCFM_optA_gauss_dynC1"
+    }
+}

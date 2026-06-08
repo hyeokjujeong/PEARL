@@ -1,7 +1,8 @@
 import numpy as np
 
 
-def rollout(env, agent, max_path_length=np.inf, accum_context=True, animated=False, save_frames=False):
+def rollout(env, agent, max_path_length=np.inf, accum_context=True,
+            animated=False, save_frames=False, changing_c_freq=None):
     """
     The following value for the following keys will be a 2D array, with the
     first dimension corresponding to the time dimension.
@@ -22,6 +23,9 @@ def rollout(env, agent, max_path_length=np.inf, accum_context=True, animated=Fal
     :param accum_context: if True, accumulate the collected context
     :param animated:
     :param save_frames: if True, save video of rollout
+    :param changing_c_freq: if int >= 1, re-infer posterior every N env steps
+        within this rollout (after the Nth transition is appended to context).
+        Default None = PEARL behaviour (c stays fixed within trajectory).
     :return:
     """
     observations = []
@@ -49,6 +53,15 @@ def rollout(env, agent, max_path_length=np.inf, accum_context=True, animated=Fal
         agent_infos.append(agent_info)
         path_length += 1
         o = next_o
+        # ---- in-line posterior re-inference (changing-c) ----------------
+        # After accumulating context with the just-finished transition,
+        # optionally re-infer c so the NEXT action uses the updated belief.
+        # No-op when changing_c_freq is None (PEARL fixed-c behaviour) or
+        # when context isn't being accumulated for this rollout.
+        if (changing_c_freq is not None and accum_context
+                and agent.context is not None
+                and path_length % int(changing_c_freq) == 0):
+            agent.infer_posterior(agent.context)
         if animated:
             env.render()
         if save_frames:

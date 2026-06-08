@@ -27,11 +27,14 @@ class InPlacePathSampler(object):
     def shutdown_worker(self):
         pass
 
-    def obtain_samples(self, deterministic=False, max_samples=np.inf, max_trajs=np.inf, accum_context=True, resample=1):
+    def obtain_samples(self, deterministic=False, max_samples=np.inf, max_trajs=np.inf,
+                       accum_context=True, resample=1, changing_c_freq=None):
         """
         Obtains samples in the environment until either we reach either max_samples transitions or
         num_traj trajectories.
         The resample argument specifies how often (in trajectories) the agent will resample it's context.
+        `changing_c_freq` (None / int >= 1) is forwarded to rollout — when set, posterior
+        is re-inferred every N env steps within a trajectory.
         """
         assert max_samples < np.inf or max_trajs < np.inf, "either max_samples or max_trajs must be finite"
         policy = MakeDeterministic(self.policy) if deterministic else self.policy
@@ -40,7 +43,8 @@ class InPlacePathSampler(object):
         n_trajs = 0
         while n_steps_total < max_samples and n_trajs < max_trajs:
             path = rollout(
-                self.env, policy, max_path_length=self.max_path_length, accum_context=accum_context)
+                self.env, policy, max_path_length=self.max_path_length,
+                accum_context=accum_context, changing_c_freq=changing_c_freq)
             # save the latent context that generated this trajectory
             path['context'] = policy.z.detach().cpu().numpy()
             paths.append(path)

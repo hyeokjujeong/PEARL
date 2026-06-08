@@ -197,12 +197,19 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         # start from the prior
         self.agent.clear_z()
 
+        # changing-c (dynamic-c-inference) — when set, re-infer posterior every
+        # N env steps within each rollout. None = PEARL default (fixed c per
+        # trajectory). Attribute set by the launcher from flow_params.
+        changing_c_freq = getattr(self, 'changing_c_freq', None)
+        accum_for_train = changing_c_freq is not None  # need accumulating context for in-line infer
+
         num_transitions = 0
         while num_transitions < num_samples:
             paths, n_samples = self.sampler.obtain_samples(max_samples=num_samples - num_transitions,
                                                                 max_trajs=update_posterior_rate,
-                                                                accum_context=False,
-                                                                resample=resample_z_rate)
+                                                                accum_context=accum_for_train,
+                                                                resample=resample_z_rate,
+                                                                changing_c_freq=changing_c_freq)
             num_transitions += n_samples
             self.replay_buffer.add_paths(self.task_idx, paths)
             if add_to_enc_buffer:
@@ -319,7 +326,14 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
             data_to_save['algorithm'] = self
         return data_to_save
 
-    def collect_paths(self, idx, epoch, run):
+    def collect_paths(self, idx, epoch, run, changing_c_freq=None):
+        '''
+        :param changing_c_freq: forwarded to obtain_samples → rollout. None =
+            PEARL fixed-c eval (between-trajectory infer after num_exp_traj_eval
+            exploration trajectories). int N ≥ 1 = dynamic-c eval (each
+            trajectory starts with fresh context and re-infers every N env
+            steps within rollout — measures within-episode adaptation).
+        '''
         self.task_idx = idx
         self.env.reset_task(idx)
 
@@ -328,11 +342,16 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         num_transitions = 0
         num_trajs = 0
         while num_transitions < self.num_steps_per_eval:
-            path, num = self.sampler.obtain_samples(deterministic=self.eval_deterministic, max_samples=self.num_steps_per_eval - num_transitions, max_trajs=1, accum_context=True)
+            path, num = self.sampler.obtain_samples(deterministic=self.eval_deterministic,
+                                                    max_samples=self.num_steps_per_eval - num_transitions,
+                                                    max_trajs=1, accum_context=True,
+                                                    changing_c_freq=changing_c_freq)
             paths += path
             num_transitions += num
             num_trajs += 1
-            if num_trajs >= self.num_exp_traj_eval:
+            # PEARL standard eval: between-trajectory infer after exploration trajs.
+            # Skipped in changing-c eval (in-line infer inside rollout does this work).
+            if changing_c_freq is None and num_trajs >= self.num_exp_traj_eval:
                 self.agent.infer_posterior(self.agent.context)
 
         if self.sparse_rewards:
@@ -350,13 +369,13 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
 
         return paths
 
-    def _do_eval(self, indices, epoch):
+    def _do_eval(self, indices, epoch, changing_c_freq=None):
         final_returns = []
         online_returns = []
         for idx in indices:
             all_rets = []
             for r in range(self.num_evals):
-                paths = self.collect_paths(idx, epoch, r)
+                paths = self.collect_paths(idx, epoch, r, changing_c_freq=changing_c_freq)
                 all_rets.append([eval_util.get_average_returns([p]) for p in paths])
             final_returns.append(np.mean([a[-1] for a in all_rets]))
             # record online returns for the first n trajectories
@@ -419,6 +438,18 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         eval_util.dprint('test online returns')
         eval_util.dprint(test_online_returns)
 
+        # === dynamic-c eval (Option C): same agent, re-evaluate with in-line
+        # posterior re-inference within each trajectory. Compared to PEARL
+        # fixed-c eval above, this measures within-episode adaptation benefit.
+        # Skipped when changing_c_freq is None (no second pass needed).
+        changing_c_freq = getattr(self, 'changing_c_freq', None)
+        if changing_c_freq is not None:
+            eval_util.dprint('dynamic-c eval (freq={}) on test tasks'.format(changing_c_freq))
+            test_final_returns_dyn, test_online_returns_dyn = self._do_eval(
+                self.eval_tasks, epoch, changing_c_freq=changing_c_freq)
+            train_final_returns_dyn, _ = self._do_eval(
+                indices, epoch, changing_c_freq=changing_c_freq)
+
         # save the final posterior
         self.agent.log_diagnostics(self.eval_statistics)
 
@@ -432,6 +463,9 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         self.eval_statistics['AverageTrainReturn_all_train_tasks'] = train_returns
         self.eval_statistics['AverageReturn_all_train_tasks'] = avg_train_return
         self.eval_statistics['AverageReturn_all_test_tasks'] = avg_test_return
+        if changing_c_freq is not None:
+            self.eval_statistics['AverageReturn_all_test_tasks_dynC'] = np.mean(test_final_returns_dyn)
+            self.eval_statistics['AverageReturn_all_train_tasks_dynC'] = np.mean(train_final_returns_dyn)
         logger.save_extra_data(avg_train_online_return, path='online-train-epoch{}'.format(epoch))
         logger.save_extra_data(avg_test_online_return, path='online-test-epoch{}'.format(epoch))
 

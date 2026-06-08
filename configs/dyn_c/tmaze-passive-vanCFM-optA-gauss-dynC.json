@@ -1,0 +1,42 @@
+{
+    "env_name": "tmaze-passive",
+    "method": "flow",
+    "n_train_tasks": 2,
+    "n_eval_tasks": 2,
+    "env_params": {
+        "n_tasks": 2,
+        "corridor_length": 10
+    },
+    "latent_size": 2,
+    "algo_params": {
+        "max_path_length": 11,
+        "num_initial_steps": 200,
+        "num_steps_prior": 200,
+        "num_steps_posterior": 0,
+        "num_extra_rl_steps_posterior": 200,
+        "num_train_steps_per_itr": 1000,
+        "num_evals": 32,
+        "num_steps_per_eval": 44,
+        "reward_scale": 100.0,
+        "use_information_bottleneck": false,
+        "batch_size": 64,
+        "embedding_batch_size": 64,
+        "embedding_mini_batch_size": 64,
+        "meta_batch": 2
+    },
+    "flow_params": {
+        "training_mode": "singleVel+vanillaCFM",
+        "use_prior_flow": false,
+        "cfm_weight": 1.0,
+        "cfm_warmup_steps": 0,
+        "recon_weight": 0.0,
+        "max_context": null,
+        "sac_detach_task_z": false,
+        "changing_c_freq": 1
+    },
+    "util_params": {
+        "use_wandb": true,
+        "wandb_project": "pearl_dyn_c",
+        "wandb_run_name": "tmaze_vanCFM_optA_gauss_dynC1"
+    }
+}

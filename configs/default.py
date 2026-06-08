@@ -74,6 +74,8 @@ default_config = dict(
         max_context=16,           # subsample context for fused ODE; None = use ALL transitions (paper-faithful)
         vel_clip=10.0,            # tanh-squash on fused velocity norm (MVP guard); set high to effectively disable
         tau_eps=0.05,             # ODE integration interval is [tau_eps, 1-tau_eps]
+        grad_clip=None,           # None = off; float > 0 = global L2 max-norm on flow-net grads (encoder/decoder/prior). Set from the flow_encoder_grad_l2 log.
+        changing_c_freq=None,     # None = PEARL default (c fixed within trajectory). int N > 0 = re-infer posterior every N env steps within rollout. N=1 means infer every step. Used by tools/probe_flow_posterior + new dynamic-c experiments.
     ),
 )
 

@@ -128,6 +128,9 @@ def experiment(variant):
         algorithm.flow_training_mode = variant['flow_params'].get('training_mode', 'fusedVel+decoderCFM')
         algorithm.prior_weight = variant['flow_params'].get('prior_weight', 1.0)
         algorithm.sac_detach_task_z = variant['flow_params'].get('sac_detach_task_z', True)
+        algorithm.grad_clip = variant['flow_params'].get('grad_clip', None)
+        # dynamic-c-inference (within-episode posterior re-inference)
+        algorithm.changing_c_freq = variant['flow_params'].get('changing_c_freq', None)
         algorithm.prior_flow = prior_flow
         if prior_flow is not None:
             algorithm.prior_optimizer = torch.optim.Adam(

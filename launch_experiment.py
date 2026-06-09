@@ -131,6 +131,9 @@ def experiment(variant):
         algorithm.grad_clip = variant['flow_params'].get('grad_clip', None)
         # dynamic-c-inference (within-episode posterior re-inference)
         algorithm.changing_c_freq = variant['flow_params'].get('changing_c_freq', None)
+        # eval freq decoupled from train freq (v5 ablation). None = inherit train.
+        algorithm.eval_changing_c_freq = variant['flow_params'].get(
+            'eval_changing_c_freq', algorithm.changing_c_freq)
         algorithm.prior_flow = prior_flow
         if prior_flow is not None:
             algorithm.prior_optimizer = torch.optim.Adam(

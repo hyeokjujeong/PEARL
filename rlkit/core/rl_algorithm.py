@@ -441,14 +441,15 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         # === dynamic-c eval (Option C): same agent, re-evaluate with in-line
         # posterior re-inference within each trajectory. Compared to PEARL
         # fixed-c eval above, this measures within-episode adaptation benefit.
-        # Skipped when changing_c_freq is None (no second pass needed).
-        changing_c_freq = getattr(self, 'changing_c_freq', None)
-        if changing_c_freq is not None:
-            eval_util.dprint('dynamic-c eval (freq={}) on test tasks'.format(changing_c_freq))
+        # Uses self.eval_changing_c_freq (set independently of train freq
+        # via flow_params.eval_changing_c_freq). Skipped when None.
+        eval_changing_c_freq = getattr(self, 'eval_changing_c_freq', None)
+        if eval_changing_c_freq is not None:
+            eval_util.dprint('dynamic-c eval (freq={}) on test tasks'.format(eval_changing_c_freq))
             test_final_returns_dyn, test_online_returns_dyn = self._do_eval(
-                self.eval_tasks, epoch, changing_c_freq=changing_c_freq)
+                self.eval_tasks, epoch, changing_c_freq=eval_changing_c_freq)
             train_final_returns_dyn, _ = self._do_eval(
-                indices, epoch, changing_c_freq=changing_c_freq)
+                indices, epoch, changing_c_freq=eval_changing_c_freq)
 
         # save the final posterior
         self.agent.log_diagnostics(self.eval_statistics)
@@ -463,7 +464,7 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         self.eval_statistics['AverageTrainReturn_all_train_tasks'] = train_returns
         self.eval_statistics['AverageReturn_all_train_tasks'] = avg_train_return
         self.eval_statistics['AverageReturn_all_test_tasks'] = avg_test_return
-        if changing_c_freq is not None:
+        if eval_changing_c_freq is not None:
             self.eval_statistics['AverageReturn_all_test_tasks_dynC'] = np.mean(test_final_returns_dyn)
             self.eval_statistics['AverageReturn_all_train_tasks_dynC'] = np.mean(train_final_returns_dyn)
         logger.save_extra_data(avg_train_online_return, path='online-train-epoch{}'.format(epoch))

@@ -75,7 +75,8 @@ default_config = dict(
         vel_clip=10.0,            # tanh-squash on fused velocity norm (MVP guard); set high to effectively disable
         tau_eps=0.05,             # ODE integration interval is [tau_eps, 1-tau_eps]
         grad_clip=None,           # None = off; float > 0 = global L2 max-norm on flow-net grads (encoder/decoder/prior). Set from the flow_encoder_grad_l2 log.
-        changing_c_freq=None,     # None = PEARL default (c fixed within trajectory). int N > 0 = re-infer posterior every N env steps within rollout. N=1 means infer every step. Used by tools/probe_flow_posterior + new dynamic-c experiments.
+        changing_c_freq=None,     # TRAIN freq. None = PEARL default (c fixed within trajectory). int N > 0 = re-infer posterior every N env steps within rollout during data collection. N=1 means infer every step. Also acts as eval freq if eval_changing_c_freq is not set (backward compat).
+        eval_changing_c_freq=None,  # EVAL freq (Option C dual eval). None = inherit from changing_c_freq (backward compat). Set explicitly to decouple train and eval, e.g. train fix-c + eval dyn-c to measure deployment-only dyn-c benefit (v5 ablation).
     ),
 )
 

@@ -1,105 +1,259 @@
-# PEARL: Efficient Off-policy Meta-learning via Probabilistic Context Variables
+# PEARL + CFM Range-Goal Benchmark
 
-on arxiv: http://arxiv.org/abs/1903.08254
+This branch extends the original PEARL implementation into a modern
+meta-reinforcement-learning sandbox for comparing task-inference methods on
+hidden-context environments.
 
-by Kate Rakelly*, Aurick Zhou*, Deirdre Quillen, Chelsea Finn, and Sergey Levine (UC Berkeley)
+The main additions are:
 
-> Deep reinforcement learning algorithms require large amounts of experience to learn an individual
-task. While in principle meta-reinforcement learning (meta-RL) algorithms enable agents to learn
-new skills from small amounts of experience, several major challenges preclude their practicality.
-Current methods rely heavily on on-policy experience, limiting their sample efficiency. They also
-lack mechanisms to reason about task uncertainty when adapting to new tasks, limiting their effectiveness
-in sparse reward problems. In this paper, we address these challenges by developing an offpolicy meta-RL
-algorithm that disentangles task inference and control. In our approach, we perform online probabilistic
-filtering of latent task variables to infer how to solve a new task from small amounts of experience.
-This probabilistic interpretation enables posterior sampling for structured and efficient exploration.
-We demonstrate how to integrate these task variables with off-policy RL algorithms to achieve both metatraining
-and adaptation efficiency. Our method outperforms prior algorithms in sample efficiency by 20-100X as well as
-in asymptotic performance on several meta-RL benchmarks.
+- a 2026-compatible runtime based on Python 3.11, Gymnasium, PyTorch, and the
+  DeepMind `mujoco` package;
+- a flow-matching / CFM context-inference path selected with `method: "flow"`;
+- a VariBAD-style PPO + VAE adapter selected with `method: "varibad"`;
+- a Range-Goal GridWorld benchmark for online belief refinement from ambiguous
+  range observations;
+- discrete-SAC support for Box-shaped PEARL actions, stochastic/argmax action
+  execution, invalid-action masking, W&B logging, and smoke-test configs.
 
-*Note 5/22/20: The ant-goal experiment is currently not reproduced correctly. We are aware of the problem and are looking into it. We do not anticipate pushing a fix before the Neurips 2020 deadline.*
+The original PEARL implementation is preserved as `method: "baseline"`.
 
-This is the reference implementation of the algorithm; however, some scripts for reproducing a few of the experiments from the paper are missing.
-This repository is based on [rlkit](https://github.com/vitchyr/rlkit).
+## What Is In This Branch
 
---------------------------------------
+### Methods
 
-#### Modernized setup (2026)
+| Config value | Method | Main code |
+| --- | --- | --- |
+| `baseline` | Original PEARL with a Gaussian context encoder | `rlkit/torch/sac` |
+| `flow` | PEARL control with CFM / flow-matching context inference | `rlkit/torch/flow` |
+| `varibad` | PPO + VAE VariBAD loop running on PEARL task envs | `rlkit/torch/varibad` |
 
-The original environment (`docker/environment.yml`) is pinned to 2019 builds
-(python 3.5, torch 1.0.1, CUDA 10, `mujoco-py` 1.50) and no longer installs on
-current systems or runs on recent GPUs. A modernized dependency set is provided
-in `requirements.txt`. It uses python 3.11, recent PyTorch, **gymnasium**
-instead of `gym`, and the DeepMind **`mujoco`** package instead of `mujoco-py`
-(so no MuJoCo license key is needed).
+The launcher chooses the method from the experiment JSON:
 
+```json
+{
+  "method": "flow"
+}
 ```
+
+### Range-Goal GridWorld
+
+`RangeGoalGridWorld` is a hidden-goal 2D benchmark. The task context is a fixed
+goal cell. The agent observes its own position, the map, and a coarse range bin
+derived from the obstacle-aware shortest-path distance to the hidden goal. The
+goal itself is not part of the observation.
+
+This is designed to make one transition ambiguous: a single range bin usually
+supports many possible goals, so useful behavior requires combining evidence
+over time.
+
+Registered PEARL env IDs:
+
+- `range-goal-gridworld`
+- `range-goal-gridworld-ambiguous`
+- `range-goal-gridworld-diag`
+- `range-goal-gridworld-main`
+
+Direct Gymnasium inspection IDs are registered by importing
+`range_goal_gridworld`:
+
+- `RangeGoalGridWorld-LevelA-15x15-v0`
+- `RangeGoalGridWorld-LevelA-21x21-v0`
+- `RangeGoalGridWorld-LevelA-Ambiguous-15x15-v0`
+- `RangeGoalGridWorld-LevelA-Main-RandomGoal-15x15-v0`
+- `RangeGoalGridWorld-LevelA-PEARL-Diag-9x9-v0`
+
+Useful debug helpers:
+
+- `compute_likelihood_support()`
+- `compute_oracle_posterior()`
+- `render_debug(show_goal=True, show_oracle=True)`
+
+See `RANGE_GOAL_GRIDWORLD_SPEC.md` for the environment specification.
+
+### Modernized Continuous-Control Stack
+
+The old PEARL environment file is pinned to Python 3.5, CUDA 10, Gym 0.12, and
+`mujoco-py`. This branch uses:
+
+- Python 3.11
+- recent PyTorch
+- Gymnasium instead of legacy Gym
+- DeepMind `mujoco` instead of `mujoco-py`
+
+The reward-varying MuJoCo tasks have been ported through a compatibility layer
+in `rlkit/envs/mujoco_env.py`. The legacy Walker/Hopper random-parameter tasks
+are not ported because they depend on `rand_param_envs` and MuJoCo 1.31.
+
+See `MODERNIZATION.md` for the porting notes.
+
+## Setup
+
+Create an environment and install dependencies:
+
+```bash
 conda create -n pearl python=3.11 -y
 conda activate pearl
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
-python launch_experiment.py ./configs/point-robot.json
 ```
 
-Verified working on this setup: `point-robot`, `sparse-point-robot`,
-`cheetah-dir`, `cheetah-vel`, `ant-dir`, `ant-goal`, `humanoid-dir` (GPU
-training). The `*_rand_params` (Walker/Hopper) tasks are **not** ported — they
-depend on the `rand_param_envs` submodule and MuJoCo131; see the modernization
-notes for the methodology to port them later.
+For CPU-only machines, install the PyTorch wheel that matches your platform
+before running `pip install -r requirements.txt`.
 
-The instructions below describe the **original** (2019) setup.
+## Quick Smoke Runs
 
-We ran our ProMP, MAML-TRPO, and RL2 baselines in the [reference ProMP repo](https://github.com/jonasrothfuss/ProMP) and our MAESN comparison in the [reference MAESN repo](https://github.com/RussellM2020/maesn_suite).
-The results for PEARL as well as all baselines on the six continuous control tasks shown in Figure 3 may be downloaded [here](https://www.dropbox.com/s/3uorwtrqzury6wt/results_cont_control.zip?dl=0).
+From the repository root:
 
-#### TODO (where is my tiny fork?)
-- [ ] fix RNN encoder version that is currently incorrect!
-- [ ] add optional convolutional encoder for learning from images
-- [x] add Walker2D and ablation experiment scripts
-- [x] add jupyter notebook to visualize sparse point robot
-- [x] policy simulation script
-- [x] add working Dockerfile for running experiments
+```bash
+python launch_experiment.py configs/range-goal-gridworld-pearl-smoke.json
+python launch_experiment.py configs/range-goal-gridworld-cfm-current-gauss-smoke.json
+python launch_experiment.py configs/range-goal-gridworld-varibad-smoke.json
+```
 
---------------------------------------
+These configs are intentionally small. They are useful for checking imports,
+task reset, data collection, encoder updates, logging, and termination behavior.
 
-#### Instructions (just a squeeze of lemon)
+## Main Range-Goal Runs
 
-Clone this repo with `git clone --recurse-submodules`.
+PEARL baseline:
 
-To run in Docker, place your MuJoCo key in the `docker` directory, then run `docker build . -t pearl` within that directory to build the Docker image tagged with the name `pearl`.
-As an example, you can then run the container interactively with a bash shell with `docker run --rm --runtime=nvidia -it -v [PATH_TO_OYSTER]:/root/code pearl:latest /bin/bash`.
-The Dockerfile included in this repo includes GPU capability, so you must have a CUDA-10 capable GPU and drivers installed.
-Disclaimer: I am committed to making this Docker work, not to making it the most minimal required. If you have changes to pare it down such that everything still works, please make a pull request and I'm happy to merge it.
+```bash
+python launch_experiment.py configs/range-goal-gridworld-main-pearl.json
+```
 
-To install locally, you will need to first install [MuJoCo](https://www.roboti.us/index.html).
-For the task distributions in which the reward function varies (Cheetah, Ant, Humanoid), install MuJoCo200.
-Set `LD_LIBRARY_PATH` to point to both the MuJoCo binaries (`/$HOME/.mujoco/mujoco200/bin`) as well as the gpu drivers (something like `/usr/lib/nvidia-390`, you can find your version by running `nvidia-smi`).
-For the remaining dependencies, we recommend using [miniconda](https://docs.conda.io/en/latest/miniconda.html) - create our environment with `conda env create -f docker/environment.yml`
-This installation has been tested only on 64-bit Ubuntu 16.04.
+CFM / flow context inference:
 
-For the task distributions where different tasks correspond to different model parameters (Walker and Hopper), MuJoCo131 is required.
-Simply install it the same way as MuJoCo200.
-These environments make use of the module `rand_param_envs` which is submoduled in this repository.
-Add the module to your python path, `export PYTHONPATH=./rand_param_envs:$PYTHONPATH`
-(Check out [direnv](https://direnv.net/) for handy directory-dependent path managenement.)
+```bash
+python launch_experiment.py configs/range-goal-gridworld-main-cfm-current-gauss.json
+```
 
-Experiments are configured via `json` configuration files located in `./configs`. To reproduce an experiment, run:
-`python launch_experiment.py ./configs/[EXP].json`
+Both main configs use:
 
-By default the code will use the GPU - to use CPU instead, set `use_gpu=False` in the appropriate config file.
+- `env_name: "range-goal-gridworld-main"`
+- 32 train tasks and 8 eval tasks
+- 11x11 empty map curriculum
+- full flattened map observation with action mask
+- distance-delta reward shaping
+- discrete SAC actor over four grid actions
+- W&B logging enabled
 
-Output files will be written to `./output/[ENV]/[EXP NAME]` where the experiment name is uniquely generated based on the date.
-The file `progress.csv` contains statistics logged over the course of training.
-We recommend `viskit` for visualizing learning curves: https://github.com/vitchyr/viskit
+For a lighter development pass, use:
 
-Network weights are also snapshotted during training.
-To evaluate a learned policy after training has concluded, run `sim_policy.py`.
-This script will run a given policy across a set of evaluation tasks and optionally generate a video of these trajectories.
-Rendering is offline and the video is saved to the experiment folder.
+```bash
+python launch_experiment.py configs/range-goal-gridworld-main-pearl-v7-smoke.json
+python launch_experiment.py configs/range-goal-gridworld-main-cfm-v7-smoke.json
+```
 
---------------------------------------
-#### Communication (slurp!)
+## Other Experiment Examples
 
-If you spot a bug or have a problem running the code, please open an issue.
+Continuous-control CFM examples:
 
-Please direct other correspondence to Kate Rakelly: rakelly@eecs.berkeley.edu
+```bash
+python launch_experiment.py configs/cheetah-dir-cfm-current-gauss.json
+python launch_experiment.py configs/sparse-point-robot-cfm-current-gauss.json
+```
+
+Original PEARL-style examples:
+
+```bash
+python launch_experiment.py configs/point-robot.json
+python launch_experiment.py configs/cheetah-dir.json
+python launch_experiment.py configs/ant-goal.json
+```
+
+Range-Goal diagnostics:
+
+```bash
+python launch_experiment.py configs/range-goal-gridworld-diag-pearl.json
+python launch_experiment.py configs/range-goal-gridworld-diag-cfm-current-gauss.json
+python scripts/visualize_range_goal_gridworld.py
+```
+
+## Config Guide
+
+All experiments are JSON files under `configs/`. They are merged into
+`configs/default.py`.
+
+Important top-level keys:
+
+- `env_name`: registered environment name in `rlkit/envs`;
+- `method`: `baseline`, `flow`, or `varibad`;
+- `n_train_tasks`, `n_eval_tasks`: task split;
+- `latent_size`: latent context dimension;
+- `env_params`: environment-specific parameters;
+- `algo_params`: SAC / PEARL training parameters;
+- `flow_params`: CFM encoder, decoder, prior-flow, and ODE settings;
+- `varibad_params`: PPO, VAE, rollout, and encoder settings;
+- `util_params`: GPU, debug, output, and W&B settings.
+
+Useful Range-Goal knobs:
+
+- `size`: grid size;
+- `horizon`: max episode length;
+- `map_family`: `empty`, `diag`, `four_room`, `u_shape`, `multi_corridor`,
+  `wall_door`, `mixed`, or `ambiguous`;
+- `bin_edges`: range-bin boundaries;
+- `obs_mode`: for example `full_flat`, `full_flat_with_mask`, `map_with_mask`,
+  or `pearl_lowdim`;
+- `action_mode`: `hard_argmax` or `softmax_stochastic`;
+- `mask_invalid_actions`: expose/action-mask invalid moves;
+- `reward_mode`: `sparse`, `distance_delta`, or bin-progress variants.
+
+## Logging And Outputs
+
+Training writes to:
+
+```text
+output/<env-or-run-name>/<timestamp>/
+```
+
+Typical files include:
+
+- `variant.json`: resolved experiment config;
+- `progress.csv`: tabular learning metrics;
+- model snapshots such as `policy.pth`, `context_encoder.pth`, and Q/V nets;
+- optional evaluation trajectories when `dump_eval_paths` is enabled.
+
+When `util_params.use_wandb` is true, `launch_experiment.py` forwards tabular
+metrics to Weights & Biases and keeps legacy metric aliases such as
+`env_steps` / `epoch` when requested by the config.
+
+## Repository Map
+
+```text
+configs/                     Experiment JSON files
+range_goal_gridworld/         Convenience import for Gymnasium inspection
+rlkit/envs/                   PEARL environments and registration
+rlkit/torch/sac/              Original PEARL/SAC implementation
+rlkit/torch/flow/             CFM / flow-matching context inference
+rlkit/torch/varibad/          VariBAD adapter, PPO, VAE, rollout storage
+scripts/                      Debug and visualization utilities
+MODERNIZATION.md              2026 porting notes
+RANGE_GOAL_GRIDWORLD_SPEC.md  Range-Goal environment specification
+```
+
+## Known Limits
+
+- Walker/Hopper random-parameter tasks are not ported to the modern MuJoCo stack.
+- The upstream PEARL README notes that the original `ant-goal` reproduction was
+  not fully resolved; this branch makes it runnable, but does not claim new
+  benchmark numbers for that known upstream issue.
+- Range-Goal GridWorld can expose the hidden goal in `info` for debugging, but
+  training configs should keep `include_oracle_in_info: false`.
+- `output/`, local logs, and W&B run artifacts are intentionally not part of the
+  uploaded source branch.
+
+## Original PEARL
+
+This repository is based on:
+
+> PEARL: Efficient Off-Policy Meta-Reinforcement Learning via Probabilistic
+> Context Variables, Kate Rakelly, Aurick Zhou, Deirdre Quillen, Chelsea Finn,
+> and Sergey Levine.
+
+Paper: <http://arxiv.org/abs/1903.08254>
+
+Original implementation: PEARL built on top of
+[`rlkit`](https://github.com/vitchyr/rlkit).
+
+The original license is preserved in `LICENSE`.

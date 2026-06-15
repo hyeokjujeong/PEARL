@@ -1,0 +1,44 @@
+{
+    "env_name": "tmaze-active",
+    "n_train_tasks": 2,
+    "n_eval_tasks": 2,
+    "latent_size": 5,
+    "net_size": 64,
+    "method": "varibad",
+    "env_params": {
+        "n_tasks": 2,
+        "corridor_length": 4
+    },
+    "algo_params": {
+        "max_path_length": 7,
+        "num_evals": 1,
+        "num_steps_per_eval": 14
+    },
+    "varibad_params": {
+        "max_rollouts_per_task": 2,
+        "max_path_length": 7,
+        "num_tasks_per_update": 2,
+        "policy_num_steps": 28,
+        "num_frames": 56,
+        "num_evals": 1,
+        "num_steps_per_eval": 14,
+        "ppo_num_epochs": 1,
+        "ppo_num_minibatch": 2,
+        "policy_layers": [64, 64],
+        "reward_decoder_layers": [64, 64],
+        "state_decoder_layers": [64, 64],
+        "encoder_gru_hidden_size": 64,
+        "vae_batch_num_trajs": 2,
+        "size_vae_buffer": 100,
+        "num_vae_updates": 1,
+        "append_done_to_obs": true,
+        "append_done_to_encoder": false,
+        "latent_input_mode": "mean_logvar",
+        "norm_rew_for_policy": false,
+        "norm_state_for_policy": false
+    },
+    "util_params": {
+        "use_gpu": false,
+        "debug": true
+    }
+}

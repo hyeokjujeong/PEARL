@@ -164,13 +164,12 @@ class FlowContextEncoder(nn.Module):
         return ((v - target) ** 2).mean()
 
     def per_transition_cfm_loss(self, context, c1):
-        """Paper Eq. 6: per-transition CFM loss on v_theta(c_tau, tau | x_i).
+        """Ablation: per-transition CFM loss on v_theta(c_tau, tau | x_i).
 
         Regresses the *single-transition* velocity field (vnet), NOT the fused
-        composition, against the OT target (c1 - c0) for each transition i in
-        the episode. This is what trains each per-transition expert correctly;
-        the inference-time PoE composition is then the product of well-trained
-        experts.
+        composition, against the OT target (c1 - c0) for each transition.
+        The provided LCI paper's Eq. 6 instead regresses the composed fused
+        velocity field, which is implemented by cfm_loss().
 
         c1 is the bootstrap target (sg[c_hat]); caller passes the same
         subsampled context that produced c_hat (`self._subsampled_context`).

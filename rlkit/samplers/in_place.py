@@ -40,7 +40,8 @@ class InPlacePathSampler(object):
         n_trajs = 0
         while n_steps_total < max_samples and n_trajs < max_trajs:
             path = rollout(
-                self.env, policy, max_path_length=self.max_path_length, accum_context=accum_context)
+                self.env, policy, max_path_length=self.max_path_length,
+                accum_context=accum_context, deterministic_action=deterministic)
             # save the latent context that generated this trajectory
             path['context'] = policy.z.detach().cpu().numpy()
             paths.append(path)
@@ -50,4 +51,3 @@ class InPlacePathSampler(object):
             if n_trajs % resample == 0:
                 policy.sample_z()
         return paths, n_steps_total
-

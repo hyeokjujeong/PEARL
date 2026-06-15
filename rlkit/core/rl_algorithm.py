@@ -353,10 +353,12 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
     def _do_eval(self, indices, epoch):
         final_returns = []
         online_returns = []
+        all_paths_for_stats = []
         for idx in indices:
             all_rets = []
             for r in range(self.num_evals):
                 paths = self.collect_paths(idx, epoch, r)
+                all_paths_for_stats += paths
                 all_rets.append([eval_util.get_average_returns([p]) for p in paths])
             final_returns.append(np.mean([a[-1] for a in all_rets]))
             # record online returns for the first n trajectories
@@ -366,7 +368,81 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
             online_returns.append(all_rets)
         n = min([len(t) for t in online_returns])
         online_returns = [t[:n] for t in online_returns]
-        return final_returns, online_returns
+        return final_returns, online_returns, self._summarize_env_paths(all_paths_for_stats)
+
+    def _summarize_env_paths(self, paths):
+        if not paths:
+            return {}
+        finals = []
+        mins = []
+        starts = []
+        reductions = []
+        collisions = []
+        invalid_action_rates = []
+        invalid_action_masses = []
+        lengths = []
+        successes = []
+        start_bins = []
+        end_bins = []
+        min_bins = []
+        bin_decrease_steps = []
+        action_counts = np.zeros(4, dtype=np.float64)
+
+        for path in paths:
+            infos = path.get('env_infos', [])
+            if not infos:
+                continue
+            distances = [info.get('distance_to_goal') for info in infos if 'distance_to_goal' in info]
+            bins = [info.get('range_bin') for info in infos if 'range_bin' in info]
+            actions = [info.get('executed_direction', info.get('action')) for info in infos]
+            for action in actions:
+                if action is not None and 0 <= int(action) < 4:
+                    action_counts[int(action)] += 1.0
+
+            last = infos[-1]
+            successes.append(float(any(info.get('reached_goal', False) for info in infos)))
+            if distances:
+                starts.append(float(last.get('start_distance', distances[0])))
+                finals.append(float(distances[-1]))
+                mins.append(float(np.min(distances)))
+                reductions.append(float(last.get('distance_reduction', starts[-1] - finals[-1])))
+            if bins:
+                start_bins.append(float(bins[0]))
+                end_bins.append(float(bins[-1]))
+                min_bins.append(float(np.min(bins)))
+                if len(bins) > 1:
+                    decreases = [float(bins[i] < bins[i - 1]) for i in range(1, len(bins))]
+                    bin_decrease_steps.append(float(np.mean(decreases)))
+            collisions.append(float(last.get('collision_count', 0.0)))
+            invalid_action_rates.append(float(last.get('invalid_action_rate', 0.0)))
+            invalid_action_masses.append(float(last.get('invalid_action_mass_mean', 0.0)))
+            lengths.append(float(last.get('episode_length', len(infos))))
+
+        total_actions = np.sum(action_counts)
+        action_ratios = action_counts / max(1.0, total_actions)
+
+        def mean_or_zero(values):
+            return float(np.mean(values)) if values else 0.0
+
+        return {
+            'success_rate': mean_or_zero(successes),
+            'avg_final_distance': mean_or_zero(finals),
+            'avg_min_distance': mean_or_zero(mins),
+            'avg_start_distance': mean_or_zero(starts),
+            'avg_distance_reduction': mean_or_zero(reductions),
+            'avg_collision_count': mean_or_zero(collisions),
+            'avg_invalid_action_rate': mean_or_zero(invalid_action_rates),
+            'avg_invalid_action_mass': mean_or_zero(invalid_action_masses),
+            'avg_episode_length': mean_or_zero(lengths),
+            'action_up_ratio': float(action_ratios[0]),
+            'action_down_ratio': float(action_ratios[1]),
+            'action_left_ratio': float(action_ratios[2]),
+            'action_right_ratio': float(action_ratios[3]),
+            'range_bin_start_mean': mean_or_zero(start_bins),
+            'range_bin_end_mean': mean_or_zero(end_bins),
+            'range_bin_min_mean': mean_or_zero(min_bins),
+            'percent_bin_decrease_steps': mean_or_zero(bin_decrease_steps),
+        }
 
     def evaluate(self, epoch):
         if self.eval_statistics is None:
@@ -409,13 +485,13 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
             train_returns.append(eval_util.get_average_returns(paths))
         train_returns = np.mean(train_returns)
         ### eval train tasks with on-policy data to match eval of test tasks
-        train_final_returns, train_online_returns = self._do_eval(indices, epoch)
+        train_final_returns, train_online_returns, train_env_stats = self._do_eval(indices, epoch)
         eval_util.dprint('train online returns')
         eval_util.dprint(train_online_returns)
 
         ### test tasks
         eval_util.dprint('evaluating on {} test tasks'.format(len(self.eval_tasks)))
-        test_final_returns, test_online_returns = self._do_eval(self.eval_tasks, epoch)
+        test_final_returns, test_online_returns, test_env_stats = self._do_eval(self.eval_tasks, epoch)
         eval_util.dprint('test online returns')
         eval_util.dprint(test_online_returns)
 
@@ -432,6 +508,10 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         self.eval_statistics['AverageTrainReturn_all_train_tasks'] = train_returns
         self.eval_statistics['AverageReturn_all_train_tasks'] = avg_train_return
         self.eval_statistics['AverageReturn_all_test_tasks'] = avg_test_return
+        for key, value in train_env_stats.items():
+            self.eval_statistics['eval_train/' + key] = value
+        for key, value in test_env_stats.items():
+            self.eval_statistics['eval_test/' + key] = value
         logger.save_extra_data(avg_train_online_return, path='online-train-epoch{}'.format(epoch))
         logger.save_extra_data(avg_test_online_return, path='online-test-epoch{}'.format(epoch))
 
@@ -461,4 +541,3 @@ class MetaRLAlgorithm(metaclass=abc.ABCMeta):
         :return:
         """
         pass
-

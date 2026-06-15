@@ -1,0 +1,47 @@
+{
+    "env_name": "range-goal-gridworld-ambiguous",
+    "method": "baseline",
+    "n_train_tasks": 16,
+    "n_eval_tasks": 4,
+    "latent_size": 5,
+    "net_size": 300,
+    "env_params": {
+        "n_tasks": 20,
+        "randomize_tasks": false,
+        "size": 15,
+        "horizon": 30,
+        "map_family": "ambiguous",
+        "bin_edges": [0, 5, 10, 15, 20],
+        "min_start_goal_dist": 8,
+        "min_initial_support": 16,
+        "min_initial_modes": 2,
+        "include_oracle_in_info": false
+    },
+    "algo_params": {
+        "meta_batch": 8,
+        "num_iterations": 500,
+        "num_initial_steps": 600,
+        "num_tasks_sample": 4,
+        "num_steps_prior": 60,
+        "num_steps_posterior": 0,
+        "num_extra_rl_steps_posterior": 60,
+        "num_train_steps_per_itr": 1000,
+        "num_evals": 3,
+        "num_steps_per_eval": 60,
+        "replay_buffer_size": 10000,
+        "batch_size": 256,
+        "embedding_batch_size": 64,
+        "embedding_mini_batch_size": 64,
+        "max_path_length": 30,
+        "reward_scale": 1.0,
+        "kl_lambda": 0.1,
+        "use_next_obs_in_context": true,
+        "num_exp_traj_eval": 1
+    },
+    "util_params": {
+        "use_gpu": true,
+        "debug": false,
+        "use_wandb": true,
+        "wandb_project": "pearl"
+    }
+}

@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch import nn as nn
+import torch.nn.functional as F
 
 import rlkit.torch.pytorch_util as ptu
 from rlkit.core.eval_util import create_stats_ordered_dict
@@ -32,6 +33,13 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
             use_information_bottleneck=True,
             use_next_obs_in_context=False,
             sparse_rewards=False,
+            use_discrete_sac_actor=False,
+            discrete_sac_action_dim=4,
+            discrete_sac_temperature=1.0,
+            discrete_sac_entropy_coeff=1.0,
+            discrete_sac_use_obs_action_mask=True,
+            q_target_clip=None,
+            grad_clip_norm=None,
 
             soft_target_tau=1e-2,
             plotter=None,
@@ -62,6 +70,13 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
         self.use_information_bottleneck = use_information_bottleneck
         self.sparse_rewards = sparse_rewards
         self.use_next_obs_in_context = use_next_obs_in_context
+        self.use_discrete_sac_actor = use_discrete_sac_actor
+        self.discrete_sac_action_dim = int(discrete_sac_action_dim)
+        self.discrete_sac_temperature = float(discrete_sac_temperature)
+        self.discrete_sac_entropy_coeff = float(discrete_sac_entropy_coeff)
+        self.discrete_sac_use_obs_action_mask = discrete_sac_use_obs_action_mask
+        self.q_target_clip = q_target_clip
+        self.grad_clip_norm = grad_clip_norm
 
         self.qf1, self.qf2, self.vf = nets[1:]
         self.target_vf = self.vf.copy()
@@ -170,6 +185,78 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
         min_q = torch.min(q1, q2)
         return min_q
 
+    def _clip_gradients(self, module):
+        if self.grad_clip_norm is None:
+            return
+        torch.nn.utils.clip_grad_norm_(module.parameters(), self.grad_clip_norm)
+
+    def _discrete_action_mask_from_obs(self, obs):
+        mask = obs[:, -self.discrete_sac_action_dim:]
+        mask = (mask > 0.5).float()
+        no_valid = mask.sum(dim=-1, keepdim=True) < 0.5
+        return torch.where(no_valid, torch.ones_like(mask), mask)
+
+    def _masked_discrete_policy(self, obs, action_logits):
+        logits = action_logits[:, :self.discrete_sac_action_dim]
+        logits = logits / max(self.discrete_sac_temperature, 1e-6)
+        if self.discrete_sac_use_obs_action_mask:
+            mask = self._discrete_action_mask_from_obs(obs)
+            logits = logits.masked_fill(mask <= 0.0, -1e9)
+        else:
+            mask = torch.ones_like(logits)
+        log_probs = F.log_softmax(logits, dim=-1)
+        probs = torch.exp(log_probs) * mask
+        probs = probs / probs.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        log_probs = torch.log(probs.clamp(min=1e-8))
+        return probs, log_probs, mask
+
+    def _min_q_all_discrete_actions(self, obs, task_z):
+        batch_size = obs.size(0)
+        action_dim = self.discrete_sac_action_dim
+        eye = torch.eye(action_dim, device=obs.device, dtype=obs.dtype)
+        action_grid = eye.unsqueeze(0).expand(batch_size, action_dim, action_dim)
+        obs_grid = obs.unsqueeze(1).expand(batch_size, action_dim, obs.size(-1))
+        z_grid = task_z.detach().unsqueeze(1).expand(batch_size, action_dim, task_z.size(-1))
+        q1 = self.qf1(
+            obs_grid.reshape(batch_size * action_dim, -1),
+            action_grid.reshape(batch_size * action_dim, -1),
+            z_grid.reshape(batch_size * action_dim, -1),
+        ).view(batch_size, action_dim)
+        q2 = self.qf2(
+            obs_grid.reshape(batch_size * action_dim, -1),
+            action_grid.reshape(batch_size * action_dim, -1),
+            z_grid.reshape(batch_size * action_dim, -1),
+        ).view(batch_size, action_dim)
+        return torch.min(q1, q2)
+
+    def _policy_value_terms(self, obs, new_actions, log_pi, task_z):
+        if not self.use_discrete_sac_actor:
+            min_q_new_actions = self._min_q(obs, new_actions, task_z)
+            return min_q_new_actions, min_q_new_actions, log_pi, {}
+
+        probs, log_probs, mask = self._masked_discrete_policy(obs, new_actions)
+        q_values = self._min_q_all_discrete_actions(obs, task_z)
+        expected_q = (probs * q_values).sum(dim=-1, keepdim=True)
+        expected_q_for_policy = (probs * q_values.detach()).sum(dim=-1, keepdim=True)
+        expected_log_pi = (probs * log_probs).sum(dim=-1, keepdim=True)
+        entropy_term = self.discrete_sac_entropy_coeff * expected_log_pi
+        entropy = -expected_log_pi
+        stats = {
+            'Discrete Policy Entropy': entropy.mean(),
+            'Discrete Expected Log Pi': expected_log_pi.mean(),
+            'Discrete Entropy Coeff': torch.tensor(
+                self.discrete_sac_entropy_coeff,
+                device=obs.device,
+                dtype=obs.dtype,
+            ),
+            'Discrete Policy Max Prob': probs.max(dim=-1)[0].mean(),
+            'Discrete Valid Action Count': mask.sum(dim=-1).mean(),
+            'Discrete Q Mean': q_values.mean(),
+            'Discrete Q Max': q_values.max(),
+            'Discrete Q Min': q_values.min(),
+        }
+        return expected_q, expected_q_for_policy, entropy_term, stats
+
     def _update_target_network(self):
         ptu.soft_update_from_to(self.vf, self.target_vf, self.soft_target_tau)
 
@@ -214,29 +301,34 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
         rewards_flat = rewards_flat * self.reward_scale
         terms_flat = terms.view(self.batch_size * num_tasks, -1)
         q_target = rewards_flat + (1. - terms_flat) * self.discount * target_v_values
+        if self.q_target_clip is not None:
+            q_target = torch.clamp(q_target, -self.q_target_clip, self.q_target_clip)
         qf_loss = torch.mean((q1_pred - q_target) ** 2) + torch.mean((q2_pred - q_target) ** 2)
         qf_loss.backward()
+        self._clip_gradients(self.qf1)
+        self._clip_gradients(self.qf2)
         self.qf1_optimizer.step()
         self.qf2_optimizer.step()
         self.context_optimizer.step()
 
-        # compute min Q on the new actions
-        min_q_new_actions = self._min_q(obs, new_actions, task_z)
+        min_q_new_actions, policy_q_new_actions, actor_log_pi, actor_stats = self._policy_value_terms(
+            obs, new_actions, log_pi, task_z)
 
         # vf update
-        v_target = min_q_new_actions - log_pi
+        v_target = min_q_new_actions - actor_log_pi
         vf_loss = self.vf_criterion(v_pred, v_target.detach())
         self.vf_optimizer.zero_grad()
         vf_loss.backward()
+        self._clip_gradients(self.vf)
         self.vf_optimizer.step()
         self._update_target_network()
 
         # policy update
         # n.b. policy update includes dQ/da
-        log_policy_target = min_q_new_actions
+        log_policy_target = policy_q_new_actions
 
         policy_loss = (
-                log_pi - log_policy_target
+                actor_log_pi - log_policy_target
         ).mean()
 
         mean_reg_loss = self.policy_mean_reg_weight * (policy_mean**2).mean()
@@ -250,6 +342,7 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
 
         self.policy_optimizer.zero_grad()
         policy_loss.backward()
+        self._clip_gradients(self.agent.policy)
         self.policy_optimizer.step()
 
         # save some statistics for eval
@@ -280,7 +373,7 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
             ))
             self.eval_statistics.update(create_stats_ordered_dict(
                 'Log Pis',
-                ptu.get_numpy(log_pi),
+                ptu.get_numpy(actor_log_pi),
             ))
             self.eval_statistics.update(create_stats_ordered_dict(
                 'Policy mu',
@@ -290,6 +383,8 @@ class PEARLSoftActorCritic(MetaRLAlgorithm):
                 'Policy log std',
                 ptu.get_numpy(policy_log_std),
             ))
+            for k, v in actor_stats.items():
+                self.eval_statistics[k] = float(ptu.get_numpy(v))
 
     def get_epoch_snapshot(self, epoch):
         # NOTE: overriding parent method which also optionally saves the env

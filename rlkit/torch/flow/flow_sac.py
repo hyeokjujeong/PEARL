@@ -51,18 +51,6 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             self.prior_flow = None
         if not hasattr(self, 'prior_optimizer'):
             self.prior_optimizer = None
-        # ---- bypass flag (hypothesis test, NOT paper-faithful) -------------
-        # When True, the paper-mode step computes a SECOND grad-enabled forward
-        # pass of the encoder and feeds it ONLY into the Q-loss path. This
-        # gives the encoder an extra gradient signal from the critic, breaking
-        # paper §3.2's "theta updated solely via L_flow" claim. Intended to
-        # test the hypothesis that pure bootstrapped EM lacks task-grounding.
-        # Policy/V/target paths still use the original no-grad c_hat.
-        self.q_grad_to_encoder = False
-        # Encoder gradient clipping. Default 10 keeps CFM-only (off-bypass)
-        # behaviour unchanged (typical CFM grad < 10) but prevents the
-        # Q->encoder explosion under bypass (observed spikes to ~8000).
-        self.encoder_grad_clip = 10.0
 
     def get_epoch_snapshot(self, epoch):
         snapshot = super().get_epoch_snapshot(epoch)
@@ -157,21 +145,27 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.qf2_optimizer.zero_grad()
         rewards_flat = rewards_raw * self.reward_scale
         q_target = rewards_flat + (1. - terms_flat) * self.discount * target_v_values
+        if self.q_target_clip is not None:
+            q_target = torch.clamp(q_target, -self.q_target_clip, self.q_target_clip)
         qf_loss = torch.mean((q1_pred - q_target) ** 2) + torch.mean((q2_pred - q_target) ** 2)
         qf_loss.backward()
+        self._clip_gradients(self.qf1)
+        self._clip_gradients(self.qf2)
         self.qf1_optimizer.step()
         self.qf2_optimizer.step()
 
-        min_q_new_actions = self._min_q(obs, new_actions, task_z)
+        min_q_new_actions, policy_q_new_actions, actor_log_pi, actor_stats = self._policy_value_terms(
+            obs, new_actions, log_pi, task_z)
 
-        v_target = min_q_new_actions - log_pi
+        v_target = min_q_new_actions - actor_log_pi
         vf_loss = self.vf_criterion(v_pred, v_target.detach())
         self.vf_optimizer.zero_grad()
         vf_loss.backward()
+        self._clip_gradients(self.vf)
         self.vf_optimizer.step()
         self._update_target_network()
 
-        policy_loss = (log_pi - min_q_new_actions).mean()
+        policy_loss = (actor_log_pi - policy_q_new_actions).mean()
         mean_reg_loss = self.policy_mean_reg_weight * (policy_mean ** 2).mean()
         std_reg_loss = self.policy_std_reg_weight * (policy_log_std ** 2).mean()
         pre_tanh_value = policy_outputs[-1]
@@ -181,6 +175,7 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         policy_loss = policy_loss + mean_reg_loss + std_reg_loss + pre_activation_reg_loss
         self.policy_optimizer.zero_grad()
         policy_loss.backward()
+        self._clip_gradients(self.agent.policy)
         self.policy_optimizer.step()
 
         # ---- eval statistics (computed once per training call) ---------------
@@ -204,11 +199,13 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             self.eval_statistics.update(create_stats_ordered_dict(
                 'V Predictions', ptu.get_numpy(v_pred)))
             self.eval_statistics.update(create_stats_ordered_dict(
-                'Log Pis', ptu.get_numpy(log_pi)))
+                'Log Pis', ptu.get_numpy(actor_log_pi)))
             self.eval_statistics.update(create_stats_ordered_dict(
                 'Policy mu', ptu.get_numpy(policy_mean)))
             self.eval_statistics.update(create_stats_ordered_dict(
                 'Policy log std', ptu.get_numpy(policy_log_std)))
+            for k, v in actor_stats.items():
+                self.eval_statistics[k] = float(ptu.get_numpy(v))
             if c_variance < self.collapse_eps:
                 print('ERROR: latent collapsed (c_variance={:.3e} < {:.1e})'.format(
                     c_variance, self.collapse_eps))
@@ -235,34 +232,28 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         # repeat c_hat per transition in the batch; matches PEARLAgent.forward
         task_z = c_hat.unsqueeze(1).expand(t, b, -1).reshape(t * b, -1)
 
-        # ---- (bypass) optional grad-enabled c for Q-loss path -----------
-        # Paper spec: task_z (no grad) used everywhere. With q_grad_to_encoder
-        # set True, we run encoder(context) AGAIN with autograd enabled and
-        # feed THAT into the Q networks only. The resulting Q-loss backward
-        # then accumulates gradient on the encoder, giving it a task-grounding
-        # signal from the critic (NOT paper-faithful; hypothesis test).
-        if self.q_grad_to_encoder:
-            c_grad = encoder(context)                          # autograd on
-            task_z_grad = c_grad.unsqueeze(1).expand(t, b, -1).reshape(t * b, -1)
-        else:
-            task_z_grad = task_z                               # paper spec: no grad
-
-        # ---- run policy on (obs, c_hat) (always no-grad path) -----------
+        # ---- run policy on (obs, c_hat) ---------------------------------
         in_ = torch.cat([obs_flat, task_z], dim=1)
         policy_outputs = self.agent.policy(in_, reparameterize=True, return_log_prob=True)
         new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
 
-        # ---- M-step: per-transition CFM (Eq. 6) on v_theta --------------
+        # ---- M-step: fused CFM (Eq. 6) on v_fused -----------------------
         sub_context = encoder._subsampled_context             # same trans. as c_hat
-        cfm_loss = encoder.per_transition_cfm_loss(sub_context, c_hat)
+        cfm_loss = encoder.cfm_loss(sub_context, c_hat)
         cfm_w = self.cfm_weight if self._n_train_steps_total >= self.cfm_warmup_steps else 0.0
         encoder_total = cfm_w * cfm_loss
 
-        # NOTE: encoder optimizer step is DEFERRED to after the Q-loss backward
-        # below, so the bypass's Q-grad can be combined with the CFM grad in a
-        # single optimizer step. When q_grad_to_encoder=False this is identical
-        # to the original (CFM-only) behaviour -- just reorganised.
         self.context_optimizer.zero_grad()
+        if encoder_total.requires_grad:
+            encoder_total.backward()
+            enc_grad_norm = sum(
+                p.grad.norm().item()
+                for p in encoder.parameters()
+                if p.grad is not None
+            )
+            self.context_optimizer.step()
+        else:
+            enc_grad_norm = 0.0
 
         # ---- M-step: prior CFM on the marginal of c_hat (L_prior) -------
         if self.prior_flow is not None and self.prior_optimizer is not None:
@@ -291,13 +282,9 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             recon_obs_loss = torch.zeros((), device=ptu.device)
             recon_r_loss = torch.zeros((), device=ptu.device)
 
-        # ---- SAC losses -------------------------------------------------
-        # Q networks see task_z_grad: identical to task_z when bypass is OFF
-        # (paper spec); has live autograd to encoder when bypass is ON.
-        # V / target use task_z (no grad) always -- the bypass only opens the
-        # Q->encoder path, not the V/policy paths.
-        q1_pred = self.qf1(obs_flat, actions_flat, task_z_grad)
-        q2_pred = self.qf2(obs_flat, actions_flat, task_z_grad)
+        # ---- SAC losses (task_z already detached) -----------------------
+        q1_pred = self.qf1(obs_flat, actions_flat, task_z)
+        q2_pred = self.qf2(obs_flat, actions_flat, task_z)
         v_pred = self.vf(obs_flat, task_z)
         with torch.no_grad():
             target_v_values = self.target_vf(next_obs_flat, task_z)
@@ -306,39 +293,27 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         self.qf2_optimizer.zero_grad()
         rewards_flat = rewards_raw * self.reward_scale
         q_target = rewards_flat + (1. - terms_flat) * self.discount * target_v_values
+        if self.q_target_clip is not None:
+            q_target = torch.clamp(q_target, -self.q_target_clip, self.q_target_clip)
         qf_loss = torch.mean((q1_pred - q_target) ** 2) + torch.mean((q2_pred - q_target) ** 2)
-        # Combine encoder loss into the same backward when bypass is on, so the
-        # encoder receives both CFM and Q gradients in one optimizer step.
-        # When off, encoder_total still backprops only via CFM (task_z_grad is
-        # task_z, no grad path to encoder from Q).
-        (encoder_total + qf_loss).backward()
-        # Clip encoder gradient: the Q->encoder path under bypass propagates
-        # through the 5-step fused ODE, which is deep + ill-conditioned and
-        # produces ~100-1000x larger / noisier gradients than the CFM path.
-        # Empirically observed enc_grad spikes to 8000+ within a single step,
-        # collapsing c_norm and c_variance permanently. A clip at 10 keeps the
-        # signal but prevents the explosion. Off-bypass runs are unaffected
-        # because their enc_grad is already < 10 (CFM only).
-        torch.nn.utils.clip_grad_norm_(encoder.parameters(), self.encoder_grad_clip)
-        enc_grad_norm = sum(
-            p.grad.norm().item()
-            for p in encoder.parameters()
-            if p.grad is not None
-        )
-        self.context_optimizer.step()       # encoder: CFM (+ Q if bypass)
+        qf_loss.backward()
+        self._clip_gradients(self.qf1)
+        self._clip_gradients(self.qf2)
         self.qf1_optimizer.step()
         self.qf2_optimizer.step()
 
-        min_q_new_actions = self._min_q(obs_flat, new_actions, task_z)
+        min_q_new_actions, policy_q_new_actions, actor_log_pi, actor_stats = self._policy_value_terms(
+            obs_flat, new_actions, log_pi, task_z)
 
-        v_target = min_q_new_actions - log_pi
+        v_target = min_q_new_actions - actor_log_pi
         vf_loss = self.vf_criterion(v_pred, v_target.detach())
         self.vf_optimizer.zero_grad()
         vf_loss.backward()
+        self._clip_gradients(self.vf)
         self.vf_optimizer.step()
         self._update_target_network()
 
-        policy_loss = (log_pi - min_q_new_actions).mean()
+        policy_loss = (actor_log_pi - policy_q_new_actions).mean()
         mean_reg_loss = self.policy_mean_reg_weight * (policy_mean ** 2).mean()
         std_reg_loss = self.policy_std_reg_weight * (policy_log_std ** 2).mean()
         pre_tanh_value = policy_outputs[-1]
@@ -348,6 +323,7 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
         policy_loss = policy_loss + mean_reg_loss + std_reg_loss + pre_activation_reg_loss
         self.policy_optimizer.zero_grad()
         policy_loss.backward()
+        self._clip_gradients(self.agent.policy)
         self.policy_optimizer.step()
 
         if self.eval_statistics is None:
@@ -370,11 +346,13 @@ class FlowPEARLSoftActorCritic(PEARLSoftActorCritic):
             self.eval_statistics.update(create_stats_ordered_dict(
                 'V Predictions', ptu.get_numpy(v_pred)))
             self.eval_statistics.update(create_stats_ordered_dict(
-                'Log Pis', ptu.get_numpy(log_pi)))
+                'Log Pis', ptu.get_numpy(actor_log_pi)))
             self.eval_statistics.update(create_stats_ordered_dict(
                 'Policy mu', ptu.get_numpy(policy_mean)))
             self.eval_statistics.update(create_stats_ordered_dict(
                 'Policy log std', ptu.get_numpy(policy_log_std)))
+            for k, v in actor_stats.items():
+                self.eval_statistics[k] = float(ptu.get_numpy(v))
             if c_variance < self.collapse_eps:
                 print('ERROR: latent collapsed (c_variance={:.3e} < {:.1e})'.format(
                     c_variance, self.collapse_eps))

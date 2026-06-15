@@ -7,7 +7,7 @@ default_config = dict(
     latent_size=5, # dimension of the latent context vector
     net_size=300, # number of units per FC layer in each network
     path_to_weights=None, # path to pre-trained weights to load into networks
-    method='baseline', # 'baseline' = original PEARL; 'flow' = flow-matching context inference
+    method='baseline', # 'baseline' = original PEARL; 'flow' = flow-matching context inference; 'varibad' = PPO+VAE VariBAD
     env_params=dict(
         n_tasks=2, # number of distinct tasks in this domain, shoudl equal sum of train and eval tasks
         randomize_tasks=True, # shuffle the tasks after creating them
@@ -66,20 +66,85 @@ default_config = dict(
         use_prior_flow=False,     # learn unconditional v_phi for the marginal p(c)
         prior_hidden=128,         # hidden width of the prior flow v_phi
         prior_weight=1.0,         # alpha' in Eq. 7 (weight on L_prior)
-        # bypass for paper mode: feed Q-loss gradient into encoder too.
-        # NOT paper-faithful; intended as a hypothesis test for whether pure
-        # bootstrapped EM lacks task-grounding signal.
-        q_grad_to_encoder=False,
-        # Encoder gradient clipping. Default 10 keeps off-bypass behaviour
-        # unchanged (CFM-only grad < 10 empirically) but prevents the
-        # Q->encoder explosion under bypass (observed spikes to ~8000).
-        encoder_grad_clip=10.0,
         # ---- numerical guards / ablation knobs (paper Plan §4 stage 4) -------
         max_context=16,           # subsample context for fused ODE; None = use ALL transitions (paper-faithful)
         vel_clip=10.0,            # tanh-squash on fused velocity norm (MVP guard); set high to effectively disable
         tau_eps=0.05,             # ODE integration interval is [tau_eps, 1-tau_eps]
     ),
+    varibad_params=dict(
+        max_rollouts_per_task=2,
+        max_path_length=200,
+        num_tasks_per_update=1,
+        policy_num_steps=400,
+        num_processes=1,
+        num_frames=10000000,
+        num_evals=2,
+        num_steps_per_eval=600,
+        eval_shuffled_latent=False,
+        log_rollout_diagnostics=False,
+        max_logged_rollout_events=8,
+        policy_gamma=0.99,
+        policy_tau=0.95,
+        policy_use_gae=True,
+        policy_value_loss_coef=0.5,
+        policy_entropy_coef=0.01,
+        policy_optimiser='adam',
+        policy_eps=1e-5,
+        policy_max_grad_norm=0.5,
+        policy_layers=[300, 300],
+        policy_activation_function='tanh',
+        policy_initialisation='orthogonal',
+        policy_init_std=1.0,
+        lr_policy=7e-4,
+        ppo_num_epochs=5,
+        ppo_num_minibatch=5,
+        ppo_clip_param=0.2,
+        ppo_use_huberloss=True,
+        ppo_use_clipped_value_loss=True,
+        pass_state_to_policy=True,
+        pass_latent_to_policy=True,
+        pass_belief_to_policy=False,
+        pass_task_to_policy=False,
+        norm_state_for_policy=False,
+        norm_latent_for_policy=False,
+        norm_belief_for_policy=False,
+        norm_task_for_policy=False,
+        norm_rew_for_policy=False,
+        norm_actions_pre_sampling=False,
+        norm_actions_post_sampling=True,
+        append_done_to_obs=False,
+        append_done_to_encoder=False,
+        latent_input_mode='mean_logvar',
+        sample_embeddings=False,
+        add_nonlinearity_to_latent=False,
+        encoder_gru_hidden_size=128,
+        encoder_layers_before_gru=[],
+        encoder_layers_after_gru=[],
+        action_embedding_size=16,
+        state_embedding_size=32,
+        reward_embedding_size=16,
+        lr_vae=1e-3,
+        decode_reward=True,
+        decode_state=False,
+        disable_decoder=False,
+        disable_kl_term=False,
+        disable_stochasticity_in_latent=False,
+        kl_to_gauss_prior=False,
+        rew_loss_coeff=1.0,
+        state_loss_coeff=0.0,
+        kl_weight=0.1,
+        reward_decoder_layers=[300, 300],
+        state_decoder_layers=[300, 300],
+        rew_pred_type='deterministic',
+        state_pred_type='deterministic',
+        input_prev_state=True,
+        input_action=True,
+        size_vae_buffer=10000,
+        vae_buffer_add_thresh=1.0,
+        vae_batch_num_trajs=25,
+        num_vae_updates=1,
+        encoder_max_grad_norm=0.5,
+        decoder_max_grad_norm=0.5,
+        tbptt_stepsize=None,
+    ),
 )
-
-
-

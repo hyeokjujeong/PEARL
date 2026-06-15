@@ -3,22 +3,34 @@
 *.pyc
 *.ipynb_checkpoints
 __pycache__
+.pytest_cache/
+.mypy_cache/
 
 *.npy
+*.npz
 *.pkl
 
 *.swp
 *.swo
 
+.env
 .envrc
+.venv/
+venv/
 
 ## Project
 
+*.pt
 *.pth
+*.ckpt
+*.log
 *live.ipynb
 
-/output
-/output/**
+output/
+wandb/
+logs/
+checkpoints/
+runs/
 
 # Claude Code & local scratch
 CLAUDE.md

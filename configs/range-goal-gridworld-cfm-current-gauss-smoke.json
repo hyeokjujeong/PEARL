@@ -1,0 +1,59 @@
+{
+    "env_name": "range-goal-gridworld-ambiguous",
+    "method": "flow",
+    "n_train_tasks": 4,
+    "n_eval_tasks": 2,
+    "latent_size": 5,
+    "net_size": 64,
+    "env_params": {
+        "n_tasks": 6,
+        "randomize_tasks": false,
+        "size": 15,
+        "horizon": 30,
+        "map_family": "ambiguous",
+        "bin_edges": [0, 5, 10, 15, 20],
+        "min_start_goal_dist": 8,
+        "min_initial_support": 16,
+        "min_initial_modes": 2,
+        "include_oracle_in_info": false
+    },
+    "algo_params": {
+        "meta_batch": 2,
+        "num_iterations": 1,
+        "num_initial_steps": 60,
+        "num_tasks_sample": 2,
+        "num_steps_prior": 30,
+        "num_steps_posterior": 0,
+        "num_extra_rl_steps_posterior": 30,
+        "num_train_steps_per_itr": 1,
+        "num_evals": 1,
+        "num_steps_per_eval": 60,
+        "batch_size": 16,
+        "embedding_batch_size": 16,
+        "embedding_mini_batch_size": 16,
+        "max_path_length": 30,
+        "reward_scale": 1.0,
+        "kl_lambda": 0.1,
+        "use_next_obs_in_context": true
+    },
+    "flow_params": {
+        "encoder_hidden": 64,
+        "decoder_hidden": 64,
+        "n_ode_steps": 3,
+        "recon_weight": 1.0,
+        "use_dynamics_decoder": true,
+        "collapse_eps": 0.000001,
+        "cfm_weight": 1.0,
+        "cfm_warmup_steps": 0,
+        "training_mode": "current",
+        "use_prior_flow": false,
+        "max_context": 16,
+        "vel_clip": 10.0,
+        "tau_eps": 0.05
+    },
+    "util_params": {
+        "use_gpu": false,
+        "debug": true,
+        "use_wandb": false
+    }
+}

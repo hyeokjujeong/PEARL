@@ -1,0 +1,99 @@
+{
+    "env_name": "cheetah-dir",
+    "method": "varibad",
+    "n_train_tasks": 2,
+    "n_eval_tasks": 2,
+    "latent_size": 5,
+    "net_size": 300,
+    "env_params": {
+        "n_tasks": 2,
+        "randomize_tasks": true
+    },
+    "algo_params": {
+        "max_path_length": 200,
+        "num_evals": 4,
+        "num_steps_per_eval": 600
+    },
+    "varibad_params": {
+        "max_rollouts_per_task": 2,
+        "max_path_length": 200,
+        "num_tasks_per_update": 8,
+        "policy_num_steps": 3200,
+        "num_frames": 5000000,
+
+        "num_evals": 4,
+        "num_steps_per_eval": 600,
+        "eval_shuffled_latent": true,
+
+        "ppo_num_epochs": 2,
+        "ppo_num_minibatch": 4,
+        "ppo_clip_param": 0.1,
+        "ppo_log_ratio_clip": 20.0,
+        "policy_gamma": 0.99,
+        "policy_tau": 0.95,
+        "policy_use_gae": true,
+        "policy_value_loss_coef": 0.5,
+        "policy_entropy_coef": 0.01,
+        "policy_max_grad_norm": 0.5,
+        "lr_policy": 0.0001,
+
+        "policy_layers": [300, 300],
+        "policy_activation_function": "tanh",
+        "policy_initialisation": "orthogonal",
+        "policy_init_std": 0.5,
+        "policy_logstd_min": -5.0,
+        "policy_logstd_max": 1.0,
+        "policy_mean_clip": 10.0,
+
+        "pass_state_to_policy": true,
+        "pass_latent_to_policy": true,
+        "pass_belief_to_policy": false,
+        "pass_task_to_policy": false,
+        "latent_input_mode": "mean_logvar",
+        "sample_embeddings": false,
+
+        "append_done_to_obs": true,
+        "append_done_to_encoder": false,
+
+        "norm_state_for_policy": true,
+        "norm_latent_for_policy": true,
+        "norm_rew_for_policy": true,
+        "norm_actions_pre_sampling": false,
+        "norm_actions_post_sampling": true,
+
+        "encoder_gru_hidden_size": 128,
+        "encoder_layers_before_gru": [],
+        "encoder_layers_after_gru": [],
+        "action_embedding_size": 16,
+        "state_embedding_size": 32,
+        "reward_embedding_size": 16,
+
+        "decode_reward": true,
+        "decode_state": false,
+        "disable_decoder": false,
+        "disable_kl_term": false,
+        "disable_stochasticity_in_latent": false,
+        "kl_to_gauss_prior": false,
+        "rew_loss_coeff": 1.0,
+        "state_loss_coeff": 0.0,
+        "kl_weight": 0.1,
+        "lr_vae": 0.001,
+        "reward_decoder_layers": [300, 300],
+        "state_decoder_layers": [300, 300],
+        "rew_pred_type": "deterministic",
+        "state_pred_type": "deterministic",
+        "input_prev_state": true,
+        "input_action": true,
+
+        "size_vae_buffer": 10000,
+        "vae_batch_num_trajs": 25,
+        "num_vae_updates": 1,
+        "encoder_max_grad_norm": 0.5,
+        "decoder_max_grad_norm": 0.5
+    },
+    "util_params": {
+        "use_gpu": true,
+        "use_wandb": true,
+        "debug": false
+    }
+}

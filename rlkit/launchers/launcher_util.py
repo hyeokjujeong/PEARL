@@ -191,15 +191,11 @@ def create_exp_name(exp_prefix, exp_id=0, seed=0):
 
 def create_simple_exp_name():
     """
-    Create a unique experiment name with a timestamp + PID.
-
-    The PID suffix prevents parallel-launched processes (e.g. a 6-config
-    sweep started within the same second) from colliding into the same
-    output folder and overwriting each other's progress.csv / variant.json.
+    Create a unique experiment name with a timestamp
     """
     now = datetime.datetime.now(dateutil.tz.tzlocal())
     timestamp = now.strftime('%Y_%m_%d_%H_%M_%S')
-    return "{}_pid{}".format(timestamp, os.getpid())
+    return timestamp
 
 
 def create_log_dir(exp_prefix, exp_id=None, seed=0, base_log_dir=None):

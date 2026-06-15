@@ -1,7 +1,28 @@
 import numpy as np
 
 
-def rollout(env, agent, max_path_length=np.inf, accum_context=True, animated=False, save_frames=False):
+def _action_for_learning(action, env_info):
+    executed = env_info.get('executed_direction', None)
+    if executed is None:
+        return action
+    action = np.asarray(action)
+    if action.ndim == 0:
+        return np.asarray([executed], dtype=np.float32)
+    one_hot = np.zeros_like(action, dtype=np.float32)
+    executed = int(executed)
+    if 0 <= executed < one_hot.size:
+        one_hot.reshape(-1)[executed] = 1.0
+        return one_hot
+    return action
+
+
+def _set_force_argmax_action(env, enabled):
+    if hasattr(env, 'set_force_argmax_action'):
+        return env.set_force_argmax_action(enabled)
+    return None
+
+
+def rollout(env, agent, max_path_length=np.inf, accum_context=True, animated=False, save_frames=False, deterministic_action=False):
     """
     The following value for the following keys will be a 2D array, with the
     first dimension corresponding to the time dimension.
@@ -30,34 +51,40 @@ def rollout(env, agent, max_path_length=np.inf, accum_context=True, animated=Fal
     terminals = []
     agent_infos = []
     env_infos = []
-    o = env.reset()
-    next_o = None
-    path_length = 0
+    old_force_argmax = _set_force_argmax_action(env, deterministic_action)
+    try:
+        o = env.reset()
+        next_o = None
+        path_length = 0
 
-    if animated:
-        env.render()
-    while path_length < max_path_length:
-        a, agent_info = agent.get_action(o)
-        next_o, r, d, env_info = env.step(a)
-        # update the agent's current context
-        if accum_context:
-            agent.update_context([o, a, r, next_o, d, env_info])
-        observations.append(o)
-        rewards.append(r)
-        terminals.append(d)
-        actions.append(a)
-        agent_infos.append(agent_info)
-        path_length += 1
-        o = next_o
         if animated:
             env.render()
-        if save_frames:
-            from PIL import Image
-            image = Image.fromarray(np.flipud(env.get_image()))
-            env_info['frame'] = image
-        env_infos.append(env_info)
-        if d:
-            break
+        while path_length < max_path_length:
+            a, agent_info = agent.get_action(o)
+            next_o, r, d, env_info = env.step(a)
+            learning_action = _action_for_learning(a, env_info)
+            # update the agent's current context
+            if accum_context:
+                agent.update_context([o, learning_action, r, next_o, d, env_info])
+            observations.append(o)
+            rewards.append(r)
+            terminals.append(d)
+            actions.append(learning_action)
+            agent_infos.append(agent_info)
+            path_length += 1
+            o = next_o
+            if animated:
+                env.render()
+            if save_frames:
+                from PIL import Image
+                image = Image.fromarray(np.flipud(env.get_image()))
+                env_info['frame'] = image
+            env_infos.append(env_info)
+            if d:
+                break
+    finally:
+        if old_force_argmax is not None:
+            _set_force_argmax_action(env, old_force_argmax)
 
     actions = np.array(actions)
     if len(actions.shape) == 1:

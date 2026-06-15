@@ -1,0 +1,48 @@
+{
+    "env_name": "point-robot",
+    "n_train_tasks": 80,
+    "n_eval_tasks": 20,
+    "latent_size": 5,
+    "net_size": 128,
+    "method": "varibad",
+    "env_params": {
+        "n_tasks": 100,
+        "randomize_tasks": true
+    },
+    "algo_params": {
+        "max_path_length": 50,
+        "num_evals": 2,
+        "num_steps_per_eval": 100
+    },
+    "varibad_params": {
+        "max_rollouts_per_task": 2,
+        "max_path_length": 50,
+        "num_tasks_per_update": 8,
+        "policy_num_steps": 800,
+        "num_updates": 200,
+        "num_frames": 160000,
+        "num_evals": 2,
+        "num_steps_per_eval": 100,
+        "ppo_num_epochs": 2,
+        "ppo_num_minibatch": 4,
+        "policy_layers": [128, 128],
+        "reward_decoder_layers": [128, 128],
+        "state_decoder_layers": [128, 128],
+        "encoder_gru_hidden_size": 128,
+        "vae_batch_num_trajs": 16,
+        "size_vae_buffer": 2000,
+        "num_vae_updates": 2,
+        "append_done_to_obs": true,
+        "append_done_to_encoder": false,
+        "latent_input_mode": "mean_logvar",
+        "eval_shuffled_latent": true,
+        "norm_rew_for_policy": false,
+        "norm_state_for_policy": false,
+        "kl_weight": 0.1
+    },
+    "util_params": {
+        "use_gpu": false,
+        "debug": false
+    }
+}
+
